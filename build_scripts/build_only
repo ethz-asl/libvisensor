@@ -1,0 +1,4 @@
+cd ..
+cmake -H. -Bbuild
+cd build
+make -j8

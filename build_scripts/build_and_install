@@ -1,0 +1,3 @@
+./build_only
+cd ../build
+sudo make install
