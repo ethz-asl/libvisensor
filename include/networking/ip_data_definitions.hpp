@@ -37,6 +37,10 @@
 # include <config/config.hpp>
 #endif
 
+#ifdef __APPLE__
+  #include "networking/endian.h" // compatibility header for endian.h
+#endif	/* __APPLE__ */
+
 #include <netinet/in.h> //for ntohl() and htonl()
 #include <boost/array.hpp>
 #include <boost/foreach.hpp>
