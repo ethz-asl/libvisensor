@@ -35,7 +35,7 @@
 #include <visensor/visensor_config.hpp>
 #include <stdint.h> // for uint32_t definitions
 #include <vector>
-
+#include <string>
 #include <boost/shared_ptr.hpp>
 
 namespace visensor {
