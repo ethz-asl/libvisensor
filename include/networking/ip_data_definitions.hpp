@@ -266,7 +266,7 @@ struct TimeSync
 
   TimeSyncPayload getSerialized() {
     TimeSyncPayload time_sync_payload;
-    time_sync_payload[0]=htobe64(host_time); //TODO(gohlp): find OSX compatible equivalent for htobe64
+    time_sync_payload[0]=htobe64(host_time);
     time_sync_payload[1]=htobe64(fpga_time);
     return time_sync_payload;
   }
