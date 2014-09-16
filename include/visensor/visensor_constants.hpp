@@ -4,17 +4,19 @@
  *
  * All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Redistribution and non-commercial use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *  Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *  Redistributions in binary form must reproduce the above copyright notice, this
+ *  list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *
+ *  Neither the name of the {organization} nor the names of its
+ *  contributors may be used to endorse or promote products derived from
+ *  this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -36,12 +38,13 @@
 #include <stdint.h>
 
 namespace visensor {
-  #define CAMERA_FREQUENCY 20 // Camera frequency in Hz
-  #define IMU_FREQUENCY 200
+  #define CAMERA_FREQUENCY 20 // in Hz
+  #define IMU_FREQUENCY 200 // in Hz
   #define FPGA_FREQUENCY 125000000
+  #define FPGA_TIME_COUNTER_FREQUENCY 100000.0 //fpga timestamp counter frequency
 
   namespace ViComType {
-    static const int SPI_8 = 0, SPI_16 = 1, SPI_32 = 2, I2C_8 = 3, I2C_16 = 4, I2C_32 = 5;
+    static const int SPI_8 = 0, SPI_16 = 1, SPI_32 = 2, I2C_8 = 3, I2C_16 = 4, I2C_32 = 5, FPGA_32 = 6;
   }
 
   namespace SensorType {
@@ -61,7 +64,8 @@ namespace visensor {
       LIGHT_CONTROL = 13,
       ZYNQ_STATUS = 14,
       DENSE_MATCHER = 15,
-      EXTERNAL_TRIGGER = 16
+      EXTERNAL_TRIGGER = 16,
+      MPU_9150 = 17
     };
   }  //namespace SensorType
 
@@ -84,7 +88,12 @@ namespace visensor {
       EXTERNAL_TRIGGER0 = 14,
       SENSOR_STATUS = 15,
       SENSOR_CLOCK = 16,
-      NOTE_SPECIFIED
+      FLIR0 = 17,
+      FLIR1 = 18,
+      FLIR2 = 19,
+      FLIR3 = 20,
+      LED_FLASHER0 = 21,
+      NOT_SPECIFIED
     };
 
     DSO_EXPORT inline SensorId getCamId(SensorId id) {
@@ -99,7 +108,7 @@ namespace visensor {
         case (CORNER_CAM3):
           return CAM3;
         default:
-          return NOTE_SPECIFIED;
+          return NOT_SPECIFIED;
       }
     }
   }  //namespace SensorPort

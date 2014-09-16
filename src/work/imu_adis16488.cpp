@@ -4,7 +4,7 @@ namespace visensor
 {
 
 
-ImuAdis16488::ImuAdis16488(SensorId::SensorId sensor_id, int stream_id, boost::shared_ptr<ConfigConnection> config_connection):
+ImuAdis16488::ImuAdis16488(SensorId::SensorId sensor_id, int stream_id, IpConnection::WeakPtr config_connection):
 		Imu(imu_id,
 				SensorSettings(sensor_id,SensorType::SensorType::IMU_ADIS16488,calculateBufferSize(),
 						ImuAdis16488Defaults::NUM_OF_MSGS_IN_PACKAGE,

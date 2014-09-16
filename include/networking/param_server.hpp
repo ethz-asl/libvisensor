@@ -1,32 +1,8 @@
 /*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ * param_server.hpp
  *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ *  Created on: May 18, 2012
+ *      Author: burrimi
  */
 
 #ifndef PARAM_SERVER_HPP_
@@ -34,6 +10,7 @@
 
 #include <config/config.hpp>
 #include <map>
+#include <limits>
 
 namespace param_server {
 
@@ -57,19 +34,19 @@ class AbstractParamItem {
   }
   ;
 
-  virtual uint16_t getValue()=0;
-  virtual bool setValue(uint16_t value)=0;
-  virtual uint16_t getRegValue(uint16_t prevRegValue)=0;
-  uint16_t getRegister() {
+  virtual uint32_t getValue()=0;
+  virtual bool setValue(uint32_t value)=0;
+  virtual uint32_t getRegValue(uint32_t prevRegValue)=0;
+  uint32_t getRegister() {
     return register_;
   }
   ;
 
  protected:
-  uint16_t countTrailingZeros(uint16_t x) {
+  uint32_t countTrailingZeros(uint32_t x) {
     if (x == 0)
       return 0;
-    uint16_t r = 0;
+    uint32_t r = 0;
     while ((x & 1) == 0) {
       x = x >> 1;
       r++;
@@ -78,11 +55,11 @@ class AbstractParamItem {
   }
   ;
 
-  uint16_t countLeadingZeros(uint16_t x) {
+  uint32_t countLeadingZeros(uint32_t x) {
     if (x == 0)
       return 0;
-    uint16_t r = 0;
-    const uint16_t mask = 1 << (sizeof(uint16_t) * 8 - 1);  // 0x8000 for uint16_t
+    uint32_t r = 0;
+    const uint32_t mask = 1 << (sizeof(uint32_t) * 8 - 1);  // 0x8000 for uint32_t
     while ((x & mask) == 0) {
       x = x << 1;
       r++;
@@ -91,45 +68,40 @@ class AbstractParamItem {
   }
   ;
 
-  uint16_t register_;
-  uint16_t bit_shift_;
+  uint32_t register_;
+  uint32_t bit_shift_;
   std::string param_name_;
 };
 
 class ParamItemUInt : public AbstractParamItem {
  public:
-  ParamItemUInt(uint16_t reg, uint16_t def, uint16_t mask) {
+  ParamItemUInt(uint32_t reg, uint32_t def, uint32_t mask) {
     _mask = mask;
     _default = def;
     _value = _default;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(
-        _mask);
+    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(_mask);
 
     calcDefaultMinMax();
 
     //VISENSOR_DEBUG("max %u %u\n",tempNumOfBits,_max);
   }
   ;
-  ParamItemUInt(uint16_t reg, uint16_t def, uint16_t mask, uint16_t minVal,
-                uint16_t maxVal) {
+  ParamItemUInt(uint32_t reg, uint32_t def, uint32_t mask, uint32_t minVal, uint32_t maxVal) {
     _mask = mask;
     _default = def;
     _value = _default;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(
-        _mask);
+    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(_mask);
 
     calcDefaultMinMax();
 
     if (minVal < _min)
-      VISENSOR_DEBUG("MINIMUM %u too small for desired parameter (min %u)!!!\n",
-                     minVal, _min);
+      VISENSOR_DEBUG("MINIMUM %u too small for desired parameter (min %u)!!!\n", minVal, _min);
     else
       _min = minVal;
     if (maxVal > _max)
-      VISENSOR_DEBUG("MAXIMUM %u too big for desired parameter (max %u)!!!\n",
-                     maxVal, _max);
+      VISENSOR_DEBUG("MAXIMUM %u too big for desired parameter (max %u)!!!\n", maxVal, _max);
     else
       _max = maxVal;
   }
@@ -137,35 +109,39 @@ class ParamItemUInt : public AbstractParamItem {
   }
   ;
 
-  virtual uint16_t getValue() {
+  virtual uint32_t getValue() {
     return _value;
   }
   ;
 
-  virtual bool setValue(uint16_t value) {
+  virtual bool setValue(uint32_t value) {
     _value = cropVal(value);
     return true;
   }
   ;
-
-  virtual uint16_t getRegValue(uint16_t prevRegValue) {
-    uint16_t newRegValue = _value << AbstractParamItem::bit_shift_;
+  virtual uint32_t getRegValue(uint32_t prevRegValue) {
+    uint32_t newRegValue = _value << AbstractParamItem::bit_shift_;
     //VISENSOR_DEBUG("trailing zeros: %u leading zeros %u",AbstractParamItem::countTrailingZeros(_mask),AbstractParamItem::countLeadingZeros(_mask));
-    return (prevRegValue & (~_mask)) | (newRegValue & _mask);
+    if (_mask == 0)
+      return newRegValue;
+    else
+      return (prevRegValue & (~_mask)) | (newRegValue & _mask);
   }
   ;
 
  private:
   void calcDefaultMinMax() {
     _min = 0;
-    uint16_t tempNumOfBits = sizeof(uint16_t) * 8
-        - AbstractParamItem::countLeadingZeros(_mask)
-        - AbstractParamItem::countTrailingZeros(_mask);
-    _max = (1 << tempNumOfBits) - 1;
+    if (_mask == 0)
+      _max = std::numeric_limits<uint32_t>::max();
+    else {
+      uint32_t tempNumOfBits = sizeof(uint32_t) * 8 - AbstractParamItem::countLeadingZeros(_mask) - AbstractParamItem::countTrailingZeros(_mask);
+      _max = (1ul << tempNumOfBits) - 1;
+    }
   }
   ;
 
-  uint16_t cropVal(uint16_t val) {
+  uint32_t cropVal(uint32_t val) {
     if (val < _min) {
       VISENSOR_DEBUG("desired value %u too small\n", val);
       return _min;
@@ -178,24 +154,23 @@ class ParamItemUInt : public AbstractParamItem {
   }
   ;
 
-  uint16_t _mask;
-  uint16_t _default;
-  uint16_t _min;
-  uint16_t _max;
-  uint16_t _value;
+  uint32_t _mask;
+  uint32_t _default;
+  uint32_t _min;
+  uint32_t _max;
+  uint32_t _value;
 
 };
 
 class ParamItemInt : public AbstractParamItem {
  public:
-  ParamItemInt(uint16_t reg, uint16_t def, uint16_t mask) {
+  ParamItemInt(uint32_t reg, uint32_t def, uint32_t mask) {
     mask_ = mask;
-    uint16_t * temp = (uint16_t*) &def;
+    uint32_t * temp = (uint32_t*) &def;
     default_ = *temp;
     value_ = default_;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(
-        mask_);
+    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(mask_);
 
     calcDefaultMinMax();
 
@@ -203,25 +178,21 @@ class ParamItemInt : public AbstractParamItem {
   }
   ;
 
-  ParamItemInt(uint16_t reg, uint16_t def, uint16_t mask, uint16_t minVal,
-               uint16_t maxVal) {
+  ParamItemInt(uint32_t reg, uint32_t def, uint32_t mask, uint32_t minVal, uint32_t maxVal) {
     mask_ = mask;
     default_ = def;
     value_ = default_;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(
-        mask_);
+    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(mask_);
 
     calcDefaultMinMax();
 
     if (minVal < min_)
-      VISENSOR_DEBUG("MINIMUM %u too small for desired parameter (min %i)!!!\n",
-                     minVal, min_);
+      VISENSOR_DEBUG("MINIMUM %u too small for desired parameter (min %i)!!!\n", minVal, min_);
     else
       min_ = minVal;
     if (maxVal > max_)
-      VISENSOR_DEBUG("MAXIMUM %u too big for desired parameter (max %i)!!!\n",
-                     maxVal, max_);
+      VISENSOR_DEBUG("MAXIMUM %u too big for desired parameter (max %i)!!!\n", maxVal, max_);
     else
       max_ = maxVal;
   }
@@ -230,21 +201,21 @@ class ParamItemInt : public AbstractParamItem {
   }
   ;
 
-  virtual uint16_t getValue() {
-    uint16_t * temp = (uint16_t*) &value_;
+  virtual uint32_t getValue() {
+    uint32_t * temp = (uint32_t*) &value_;
     return *temp;
   }
   ;
-  virtual bool setValue(uint16_t value) {
+  virtual bool setValue(uint32_t value) {
     int16_t * temp = (int16_t*) &value;
     value_ = cropVal(*temp);
     return true;
   }
   ;
 
-  virtual uint16_t getRegValue(uint16_t prevRegValue) {
-    uint16_t * temp = (uint16_t*) &value_;
-    uint16_t newRegValue = *temp << AbstractParamItem::bit_shift_;
+  virtual uint32_t getRegValue(uint32_t prevRegValue) {
+    uint32_t * temp = (uint32_t*) &value_;
+    uint32_t newRegValue = *temp << AbstractParamItem::bit_shift_;
 
     //VISENSOR_DEBUG("trailing zeros: %u leading zeros %u",AbstractParamItem::countTrailingZeros(_mask),AbstractParamItem::countLeadingZeros(_mask));
 
@@ -254,8 +225,7 @@ class ParamItemInt : public AbstractParamItem {
 
  private:
   void calcDefaultMinMax() {
-    uint16_t tempNumOfBits = sizeof(uint16_t) * 8
-        - AbstractParamItem::countLeadingZeros(mask_)
+    uint32_t tempNumOfBits = sizeof(uint32_t) * 8 - AbstractParamItem::countLeadingZeros(mask_)
         - AbstractParamItem::countTrailingZeros(mask_);
     min_ = 0 - (1 << (tempNumOfBits - 1));
     max_ = (1 << (tempNumOfBits - 1)) - 1;
@@ -275,7 +245,7 @@ class ParamItemInt : public AbstractParamItem {
   }
   ;
 
-  uint16_t mask_;
+  uint32_t mask_;
   int16_t default_;
   int16_t min_;
   int16_t max_;
@@ -284,29 +254,28 @@ class ParamItemInt : public AbstractParamItem {
 
 class ParamItemBool : public AbstractParamItem {
  public:
-  ParamItemBool(uint16_t reg, uint16_t def, uint16_t mask) {
+  ParamItemBool(uint32_t reg, uint32_t def, uint32_t mask) {
     _mask = mask;
     _default = (def & 1);
     _value = _default;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(
-        _mask);
+    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(_mask);
   }
   ;
   virtual ~ParamItemBool() {
   }
   ;
-  virtual uint16_t getValue() {
+  virtual uint32_t getValue() {
     return _value;
   }
   ;
-  virtual bool setValue(uint16_t value) {
+  virtual bool setValue(uint32_t value) {
     _value = value & 1;
     return true;
   }
   ;
-  virtual uint16_t getRegValue(uint16_t prevRegValue) {
-    uint16_t newRegValue = _value << AbstractParamItem::bit_shift_;
+  virtual uint32_t getRegValue(uint32_t prevRegValue) {
+    uint32_t newRegValue = _value << AbstractParamItem::bit_shift_;
 
     //VISENSOR_DEBUG("trailing zeros: %u leading zeros %u",AbstractParamItem::countTrailingZeros(_mask),AbstractParamItem::countLeadingZeros(_mask));
 
@@ -314,40 +283,38 @@ class ParamItemBool : public AbstractParamItem {
   }
   ;
  private:
-  uint16_t _mask;
+  uint32_t _mask;
   bool _default;
   bool _value;
 };
 
 class ParamItemConst : public AbstractParamItem {
  public:
-  ParamItemConst(uint16_t reg, uint16_t def, uint16_t mask) {
+  ParamItemConst(uint32_t reg, uint32_t def, uint32_t mask) {
     _mask = mask;
     _default = def;
     _value = _default;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(
-        _mask);
+    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(_mask);
 
   }
   ;
   virtual ~ParamItemConst() {
   }
   ;
-  virtual uint16_t getValue() {
+  virtual uint32_t getValue() {
     return _value;
   }
   ;
-  virtual bool setValue(uint16_t value) {
+  virtual bool setValue(uint32_t value) {
     if (value != _default)
-      VISENSOR_DEBUG(
-          "PARAM_SERVER.HPP : ERROR - trying to change constant value");
+      VISENSOR_DEBUG("PARAM_SERVER.HPP : ERROR - trying to change constant value");
     return false;
     //_value=value&1;
   }
   ;
-  virtual uint16_t getRegValue(uint16_t prevRegValue) {
-    uint16_t newRegValue = _value << AbstractParamItem::bit_shift_;
+  virtual uint32_t getRegValue(uint32_t prevRegValue) {
+    uint32_t newRegValue = _value << AbstractParamItem::bit_shift_;
 
     //VISENSOR_DEBUG("trailing zeros: %u leading zeros %u",AbstractParamItem::countTrailingZeros(_mask),AbstractParamItem::countLeadingZeros(_mask));
 
@@ -355,15 +322,15 @@ class ParamItemConst : public AbstractParamItem {
   }
   ;
  private:
-  uint16_t _mask;
-  uint16_t _default;
-  uint16_t _value;
+  uint32_t _mask;
+  uint32_t _default;
+  uint32_t _value;
 };
 
 class ParamServer {
  public:
-  void addParam(const std::string paramName, const ParamTypes type,
-                const uint16_t reg, const uint16_t def, const uint16_t mask) {
+  void addParam(const std::string paramName, const ParamTypes type, const uint32_t reg, const uint32_t def,
+                const uint32_t mask) {
     // check if parameter name exists
     if (_params.count(paramName)) {
       VISENSOR_DEBUG("Parameter \"%s\" already exists!!!\n", paramName.c_str());
@@ -394,7 +361,7 @@ class ParamServer {
       //newParam->getValue(0x08,0x04);
     }
 
-    uint16_t prevValue = 0;
+    uint32_t prevValue = 0;
 
     // if register already exists, load previously stored value
     if (_registerValues.count(reg)) {
@@ -409,9 +376,8 @@ class ParamServer {
   ;
 
   // TODO find better way to deal with min max
-  void addParam(const std::string paramName, const ParamTypes type,
-                const uint16_t reg, const uint16_t def, const uint16_t mask,
-                const uint16_t minVal, const uint16_t maxVal) {
+  void addParam(const std::string paramName, const ParamTypes type, const uint32_t reg, const uint32_t def,
+                const uint32_t mask, const uint32_t minVal, const uint32_t maxVal) {
     // check if parameter name exists
     if (_params.count(paramName)) {
       VISENSOR_DEBUG("Parameter \"%s\" already exists!!!\n", paramName.c_str());
@@ -425,8 +391,7 @@ class ParamServer {
     }
 
     if (type == UINT_T) {
-      ParamItemUInt * newParam = new ParamItemUInt(reg, def, mask, minVal,
-                                                   maxVal);
+      ParamItemUInt * newParam = new ParamItemUInt(reg, def, mask, minVal, maxVal);
       _params[paramName] = newParam;
       //newParam->getValue(0x08,0x04);
     }
@@ -443,7 +408,7 @@ class ParamServer {
       //newParam->getValue(0x08,0x04);
     }
 
-    uint16_t prevValue = 0;
+    uint32_t prevValue = 0;
 
     // if register already exists, load previously stored value
     if (_registerValues.count(reg)) {
@@ -457,8 +422,7 @@ class ParamServer {
   }
   ;
 
-  bool getConfigParam(const std::string paramName, const uint16_t value,
-                      uint16_t &reg, uint16_t &regVal) {
+  bool getConfigParam(const std::string paramName, const uint32_t value, uint32_t &reg, uint32_t &regVal) {
     // check if parameter name exists
     if (!_params.count(paramName)) {
       VISENSOR_DEBUG("Parameter \"%s\" does not exist!!!\n", paramName.c_str());
@@ -473,7 +437,7 @@ class ParamServer {
       return false;
     }
 
-    uint16_t prevValue = _registerValues[reg];
+    uint32_t prevValue = _registerValues[reg];
 
     _params[paramName]->setValue(value);
     regVal = _params[paramName]->getRegValue(prevValue);
@@ -483,8 +447,7 @@ class ParamServer {
   }
   ;
 
-  bool getConfigParam(const std::string paramName, uint16_t &reg,
-                      uint16_t &regVal) {
+  bool getConfigParam(const std::string paramName, uint32_t &reg, uint32_t &regVal) {
     // check if parameter name exists
     if (!_params.count(paramName)) {
       VISENSOR_DEBUG("Parameter \"%s\" does not exist!!!\n", paramName.c_str());
@@ -493,7 +456,7 @@ class ParamServer {
 
     reg = _params[paramName]->getRegister();
 
-    uint16_t prevValue = _registerValues[reg];
+    uint32_t prevValue = _registerValues[reg];
 
     regVal = _params[paramName]->getRegValue(prevValue);
 
@@ -505,7 +468,7 @@ class ParamServer {
  private:
 
   std::map<std::string, AbstractParamItem*> _params;
-  std::map<uint16_t, uint16_t> _registerValues;
+  std::map<uint32_t, uint32_t> _registerValues;
 };
 
 }  // namespace param_server

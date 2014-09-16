@@ -1,71 +1,50 @@
-/*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
- *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
-
+#include <boost/smart_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/asio.hpp>
 #include <boost/function.hpp>
 #include <boost/bind.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "visensor/visensor_exceptions.hpp"
 #include "networking/auto_discovery.hpp"
 #include "sensors/sensor_factory.hpp"
+#include "sensors/dense_matcher.hpp"
 #include "serial_bridge/SerialHost.hpp"
 
 #include "visensor_impl.hpp"
 
 namespace visensor {
 
-ViSensorDriver::Impl::Impl()  //:_fpga(&getSensorFromID){
+ViSensorDriver::Impl::Impl()
+: initialized_(false)
 {
   ip_connection_ = boost::make_shared<IpConnection>();
 }
 
-void ViSensorDriver::Impl::initAutodiscovery()
+std::string ViSensorDriver::Impl::initAutodiscovery()
 {
-  //find address using AutoDiscovery
-  std::string sensor_address;
-
   boost::asio::io_service io_service_;
   AutoDiscovery sensor_finder(13779);
-  sensor_address = sensor_finder.findSensor();
+  ViDeviceList sensor_list = sensor_finder.findSensor();
 
-  if (sensor_address.compare("0.0.0.0"))
-    VISENSOR_DEBUG("Autodiscovery: found sensor with IP %s\n", sensor_address.c_str());
-  else {
-    VISENSOR_DEBUG("Autodiscovery: could not find a sensor.\n");
+  if (sensor_list.empty())
     throw visensor::exceptions::ConnectionException("Autodiscovery: could not find a sensor.");
-  }
+
+  //connected to the sensor that responded first to autodiscovery requests
+  std::string sensor_address = sensor_list[0];
 
   //init with found IP address
   init(sensor_address);
+
+  return sensor_address;
+}
+
+void ViSensorDriver::Impl::getAutoDiscoveryDeviceList(ViDeviceList &hostname_list)
+{
+  boost::asio::io_service io_service_;
+  AutoDiscovery sensor_finder(13779);
+
+  hostname_list = sensor_finder.findSensor();
 }
 
 void ViSensorDriver::Impl::init(std::string hostname) {
@@ -81,7 +60,7 @@ void ViSensorDriver::Impl::init(std::string hostname) {
   for (Sensor::IdMap::iterator it = sensors_.begin(); it != sensors_.end();
       ++it) {
     // inform comm about sensor
-    ip_connection_->addSensor(it->second->stream_id(), it->second);
+    ip_connection_->addSensor(it->second->id(), it->second);
     // init sensor
     it->second->init();
   }
@@ -92,17 +71,31 @@ void ViSensorDriver::Impl::init(std::string hostname) {
 
   //set initialized flag
   initialized_ = true;
+
+  // set default cxamera calibration
+  try {
+    setCameraCalibrationSlot(0);
+  }
+  catch (visensor::exceptions const &ex) {
+//     std::cout << ex.what() << "\n";
+  }
 }
 
-ViSensorDriver::Impl::~Impl()  //:_fpga(&getSensorFromID){
+ViSensorDriver::Impl::~Impl()
 {
-  sensor_threads_.interrupt_all();
-  sensor_threads_.join_all();
+  try {
+    sensor_threads_.interrupt_all();
+    sensor_threads_.join_all();
 
-  // stop all sensors
-  for (Sensor::IdMap::iterator it = sensors_.begin();
-      it != sensors_.end(); ++it) {
-    ip_connection_->stopSensor(it->second->stream_id());
+    // stop all sensors
+    for (Sensor::IdMap::iterator it = sensors_.begin();
+        it != sensors_.end(); ++it) {
+      ip_connection_->stopSensor(it->second->id());
+    }
+
+  } catch (const std::exception &ex)
+  {
+    VISENSOR_DEBUG("ViSensorDriver::Impl exception in destructor: %s\n", ex.what());
   }
 }
 
@@ -117,31 +110,36 @@ void ViSensorDriver::Impl::startAllCameras(uint32_t rate) {
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
       it != sensors_.end(); ++it) {
-    if (it->second->type() == SensorType::CAMERA_MT9V034)
+    if (it->second->type() == SensorType::CAMERA_MT9V034
+        || it->second->type() == SensorType::CAMERA_TAU640
+        || it->second->type() == SensorType::CAMERA_TAU320)
       startSensor(it->first, rate);
   }
 }
 
 void ViSensorDriver::Impl::setCameraCallback(
-    boost::function<void(ViFrame::Ptr)> callback) {
+    boost::function<void(ViFrame::Ptr, ViErrorCode)> callback) {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
       it != sensors_.end(); ++it) {
-    if (it->second->type() == SensorType::CAMERA_MT9V034)
+    if (it->second->type() == SensorType::CAMERA_MT9V034
+        || it->second->type() == SensorType::CAMERA_TAU640
+        || it->second->type() == SensorType::CAMERA_TAU320)
       it->second->setFrameCallback(callback);
   }
 }
 
 void ViSensorDriver::Impl::setImuCallback(
-    boost::function<void(boost::shared_ptr<ViImuMsg>)> callback) {
+    boost::function<void(boost::shared_ptr<ViImuMsg>, ViErrorCode)> callback) {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
       it != sensors_.end(); ++it) {
-    if (it->second->type() == SensorType::IMU_ADIS16448)
+    if (it->second->type() == SensorType::IMU_ADIS16448
+        || it->second->type() == SensorType::MPU_9150)
       it->second->setUserCallback(callback);
   }
 }
@@ -152,17 +150,17 @@ void ViSensorDriver::Impl::startSensor(SensorId::SensorId sensor_id, uint32_t ra
 
   // check if id is valid
   if (sensors_.count(sensor_id) == 0)
-    throw visensor::exceptions::SensorException("startSensor: Invalid sensor id" + sensor_id);
+    throw visensor::exceptions::SensorException("startSensor: Invalid sensor id: " + boost::lexical_cast<std::string>(sensor_id));
 
   //TODO(gohlp) move rate check to sensor class
   if (rate == 0 || rate > 1000)
-    throw visensor::exceptions::SensorException("startSensor: Invalid rate for sensor " + sensor_id);
+    throw visensor::exceptions::SensorException("startSensor: Invalid rate for sensor: " + boost::lexical_cast<std::string>(sensor_id));
 
   // set sensor active
   sensors_.at(sensor_id)->startSensor(rate);
 
   // start triggering the sensor on the fpga
-  ip_connection_->startSensor(sensors_.at(sensor_id)->stream_id(), rate);
+  ip_connection_->startSensor(sensors_.at(sensor_id)->id(), rate);
 }
 
 void ViSensorDriver::Impl::stopSensor(SensorId::SensorId sensor_id) {
@@ -171,10 +169,10 @@ void ViSensorDriver::Impl::stopSensor(SensorId::SensorId sensor_id) {
 
   // check if id is valid
   if (sensors_.count(sensor_id) == 0)
-    throw visensor::exceptions::SensorException("stopSensor: Invalid sensor id " + sensor_id);
+    throw visensor::exceptions::SensorException("stopSensor: Invalid sensor id: " + boost::lexical_cast<std::string>(sensor_id));
 
   // stop triggering the sensor on the fpga
-  ip_connection_->stopSensor(sensors_.at(sensor_id)->stream_id());
+  ip_connection_->stopSensor(sensors_.at(sensor_id)->id());
 
   sensors_.at(sensor_id)->stopSensor();
 }
@@ -185,29 +183,44 @@ void ViSensorDriver::Impl::startAllImus(uint32_t rate) {
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
-      if (it->second->type() == SensorType::IMU_ADIS16448)
+      if (it->second->type() == SensorType::IMU_ADIS16448
+          || it->second->type() == SensorType::MPU_9150)
           startSensor(it->first, rate);
   }
 }
 
-std::vector<int> ViSensorDriver::Impl::getListOfCameraIDs() const {
+std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfSensorIDs() const {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  std::vector<int> list_of_cameras;
+  std::vector<SensorId::SensorId> list_of_sensors;
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
-      if (it->second->type() == SensorType::CAMERA_MT9V034)
+    list_of_sensors.push_back(it->first);
+  }
+  return list_of_sensors;
+}
+
+std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfCameraIDs() const {
+
+  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+
+  std::vector<SensorId::SensorId> list_of_cameras;
+  for (Sensor::IdMap::const_iterator it = sensors_.begin();
+        it != sensors_.end(); ++it) {
+      if (it->second->type() == SensorType::CAMERA_MT9V034
+          || it->second->type() == SensorType::CAMERA_TAU640
+          || it->second->type() == SensorType::CAMERA_TAU320)
     list_of_cameras.push_back(it->first);
   }
   return list_of_cameras;
 }
 
-std::vector<int> ViSensorDriver::Impl::getListOfDenseIDs() const {
+std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfDenseIDs() const {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  std::vector<int> list_of_dense;
+  std::vector<SensorId::SensorId> list_of_dense;
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
       if (it->second->type() == SensorType::DENSE_MATCHER)
@@ -216,30 +229,44 @@ std::vector<int> ViSensorDriver::Impl::getListOfDenseIDs() const {
   return list_of_dense;
 }
 
-std::vector<int> ViSensorDriver::Impl::getListOfImuIDs() const {
+std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfImuIDs() const {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  std::vector<int> list_of_imus;
+  std::vector<SensorId::SensorId> list_of_imus;
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
-      if (it->second->type() == SensorType::IMU_ADIS16448)
+      if (it->second->type() == SensorType::IMU_ADIS16448
+          || it->second->type() == SensorType::MPU_9150)
     list_of_imus.push_back(it->first);
   }
   return list_of_imus;
 }
 
-std::vector<int> ViSensorDriver::Impl::getListOfCornerIDs() const {
+std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfCornerIDs() const {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  std::vector<int> list_of_corners;
+  std::vector<SensorId::SensorId> list_of_corners;
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
       if (it->second->type() == SensorType::CORNER_MT9V034)
     list_of_corners.push_back(it->first);
   }
   return list_of_corners;
+}
+
+std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfTriggerIDs() const {
+
+  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+
+  std::vector<SensorId::SensorId> list_of_triggers;
+  for (Sensor::IdMap::const_iterator it = sensors_.begin();
+        it != sensors_.end(); ++it) {
+      if (it->second->type() == SensorType::EXTERNAL_TRIGGER)
+    list_of_triggers.push_back(it->first);
+  }
+  return list_of_triggers;
 }
 
 uint32_t ViSensorDriver::Impl::getFpgaId() const {
@@ -257,7 +284,7 @@ void ViSensorDriver::Impl::setSensorConfigParam(SensorId::SensorId sensor_id,
 
   // check if id is valid
   if (sensors_.count(sensor_id) == 0)
-    throw visensor::exceptions::SensorException("setSensorConfigParam: Invalid sensor id:  " + sensor_id);
+    throw visensor::exceptions::SensorException("setSensorConfigParam: Invalid sensor id: " + boost::lexical_cast<std::string>(sensor_id));
 
   ViConfigMsg msg = sensors_.at(sensor_id)->getConfigParam(cmd, value);
 
@@ -295,7 +322,20 @@ void ViSensorDriver::Impl::setExternalTriggerCallback(
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
       if (it->second->type() == SensorType::EXTERNAL_TRIGGER)
-    it->second->setUserCallback(callback);
+        it->second->setUserCallback(callback);
+  }
+}
+
+void ViSensorDriver::Impl::setExternalTriggerConfig(const ViExternalTriggerConfig config) {
+  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+
+  //send configure packet
+  //TODO(schneith): if there is more than one externalTrigger core, all will be
+  //                configured with the same config... maybe extend with an id...
+  for (Sensor::IdMap::const_iterator it = sensors_.begin();
+        it != sensors_.end(); ++it) {
+      if (it->second->type() == SensorType::EXTERNAL_TRIGGER)
+        ip_connection_->sendExternalTriggerConfig(it->second->id(), config);
   }
 }
 
@@ -311,7 +351,7 @@ void ViSensorDriver::Impl::startAllDenseMatchers() {
 }
 
 void ViSensorDriver::Impl::setDenseMatcherCallback(
-    boost::function<void(ViFrame::Ptr)> callback) {
+    boost::function<void(ViFrame::Ptr, ViErrorCode)> callback) {
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
@@ -320,6 +360,37 @@ void ViSensorDriver::Impl::setDenseMatcherCallback(
     if (it->second->type() == SensorType::DENSE_MATCHER)
       it->second->setFrameCallback(callback);
   }
+}
+
+void ViSensorDriver::Impl::setCameraCalibrationSlot(int slot_id /* = 0 */) {
+
+  ViCameraCalibration calib_cam0, calib_cam1;
+  std::stringstream exception_msg;
+
+  // read calibrations from sensor
+  if(getCameraCalibration(SensorId::CAM0, slot_id, calib_cam0) == false)
+    exception_msg << "Calibration of CAM0 in slot " << slot_id << " not found.\n";
+  if(getCameraCalibration(SensorId::CAM1, slot_id, calib_cam1) == false)
+    exception_msg << "Calibration of CAM1 in slot " << slot_id << " not found.\n";
+
+  if(exception_msg.str().size() > 0)
+     throw visensor::exceptions::SensorException(exception_msg.str());
+
+  // apply calibrations
+  for (Sensor::IdMap::const_iterator it = sensors_.begin();
+      it != sensors_.end(); ++it) {
+    if (it->second->type() == SensorType::DENSE_MATCHER) {
+      DenseMatcher::Ptr dense_matcher = boost::static_pointer_cast<DenseMatcher>(it->second);
+      dense_matcher->setCalibration(calib_cam0, calib_cam1);
+    }
+  }
+
+  current_camera_calibration_slot_ = slot_id;
+}
+
+int ViSensorDriver::Impl::getCameraCalibrationSlot() {
+
+  return current_camera_calibration_slot_;
 }
 
 void ViSensorDriver::Impl::sendSerialData(ViSerialData::Ptr data)
@@ -338,18 +409,18 @@ void ViSensorDriver::Impl::setSerialCallback(boost::function<void(ViSerialData::
   serial_host_->setSerialDataCallback(callback);
 }
 
-bool ViSensorDriver::Impl::setSerialDelimiter(const char serial_id, const std::string delimiter)
+void ViSensorDriver::Impl::setSerialDelimiter(const char serial_id, const std::string delimiter)
 {
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  return ip_connection_->setSerialDelimiter(serial_id, delimiter);
+  ip_connection_->setSerialDelimiter(serial_id, delimiter);
 }
 
-bool ViSensorDriver::Impl::setSerialBaudrate(const char serial_id, const unsigned int baudrate)
+void ViSensorDriver::Impl::setSerialBaudrate(const char serial_id, const unsigned int baudrate)
 {
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  return ip_connection_->setSerialBaudrate(serial_id, baudrate);
+  ip_connection_->setSerialBaudrate(serial_id, baudrate);
 }
 
 void ViSensorDriver::Impl::uploadFile(std::string& local_path,
@@ -360,16 +431,8 @@ void ViSensorDriver::Impl::uploadFile(std::string& local_path,
   ip_connection_->uploadFile(local_path, remote_path);
 }
 
-bool ViSensorDriver::Impl::setLedConfigParam(std::string cmd,
-                                               uint16_t value) {
-  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
-  //TODO(gohlp) make a LED map to access only LEDs
-//  return ip_connection_->sendLedConfig((bool) (value & 0x0001));
-  return 0;
-}
-
 void ViSensorDriver::Impl::setCornerCallback(
-    boost::function<void(ViCorner::Ptr)> callback) {
+    boost::function<void(ViCorner::Ptr, ViErrorCode)> callback) {
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
       it != sensors_.end(); ++it) {
@@ -425,12 +488,17 @@ void ViSensorDriver::Impl::startAllCorners() {
   }
 }
 
-bool ViSensorDriver::Impl::getCameraCalibration(unsigned int cam_id, unsigned int slot_id, ViCameraCalibration &calib){
+
+bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib){
+  return getCameraCalibration(cam_id, current_camera_calibration_slot_, calib);
+}
+
+bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
   return ip_connection_->readCameraCalibration(cam_id, slot_id, calib);
 }
 
-bool ViSensorDriver::Impl::setCameraCalibration(unsigned int cam_id, unsigned int slot_id, const ViCameraCalibration calib){
+bool ViSensorDriver::Impl::setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
   //slot 0 holds the factory calibration and can't be overwritten using the public API
   if(slot_id == 0)
@@ -439,5 +507,10 @@ bool ViSensorDriver::Impl::setCameraCalibration(unsigned int cam_id, unsigned in
   return ip_connection_->writeCameraCalibration(cam_id, slot_id, calib);
 }
 
+//set factory calibration on slot 0 (private API call)
+bool ViSensorDriver::Impl::setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib){
+  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+  return ip_connection_->writeCameraCalibration(cam_id, 0, calib);
+}
 
 }  //namespace visensor

@@ -1,33 +1,10 @@
 /*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ * AutoDiscovery.cpp
  *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ *  Created on: Aug 19, 2013
+ *      Author: pascal
  */
+
 
 #include <ifaddrs.h>
 #include <boost/bind.hpp>
@@ -40,6 +17,9 @@
 
 using boost::asio::deadline_timer;
 using boost::asio::ip::udp;
+
+namespace visensor
+{
 
 AutoDiscovery::AutoDiscovery(unsigned short int port)
 : socket_(io_service_),
@@ -167,8 +147,10 @@ std::vector<boost::asio::ip::address_v4> AutoDiscovery::getIpList() {
   return ip_addresses;
 }
 
-std::string AutoDiscovery::findSensor()
+ViDeviceList AutoDiscovery::findSensor()
 {
+  SensorSet sensor_set;
+
   try
   {
     boost::system::error_code error;
@@ -177,11 +159,10 @@ std::string AutoDiscovery::findSensor()
     // get list of interfaces
     std::vector<boost::asio::ip::address_v4> ip_addresses = getIpList();
 
-    VISENSOR_DEBUG("Searching for sensor on interfaces:\n");
+    VISENSOR_DEBUG("Autodiscovery is searching for sensor on interfaces:\n");
+
     for(uint j = 0; j<ip_addresses.size(); j++)
-    {
       VISENSOR_DEBUG("%d: IP: %s NETMASK: %s\n", j, ip_addresses[j].to_string().c_str(), boost::asio::ip::address_v4::netmask(ip_addresses[j]).to_string().c_str());
-    }
 
     socket_.set_option(boost::asio::ip::udp::socket::reuse_address(true));
     socket_.set_option(boost::asio::socket_base::broadcast(true));
@@ -189,15 +170,13 @@ std::string AutoDiscovery::findSensor()
     //      boost::asio::ip::udp::endpoint senderEndpoint(boost::asio::ip::address_v4::broadcast(), port_);
 
     std::string message ="Hello sensor";
-    //socket_.send_to(boost::asio::buffer(message), senderEndpoint);
-    //socket_.close(error);
-
 
     // wait for answer
     boost::asio::ip::address ipAddr = boost::asio::ip::address_v4::any();
     boost::asio::ip::udp::endpoint listen_endpoint(ipAddr, 13775);
     client c(listen_endpoint);
 
+    //send requests
     for (int i = 0; i<SENSOR_SEARCHES; i++)
     {
       for(uint j = 0; j<ip_addresses.size(); j++)
@@ -207,39 +186,51 @@ std::string AutoDiscovery::findSensor()
         try {
           socket_.send_to(boost::asio::buffer(message), senderEndpoint);
         } catch(std::exception const &ex)
-        { //ignore and try next interface... (eg. vpn interfaces will throw...)
+        {
+          //ignore and try next interface... (eg. vpn interfaces will throw...)
         }
-
-      }
-
-      char data[12];
-      boost::system::error_code ec;
-
-      c.receive_from(boost::asio::buffer(data), sensor_endpoint_,
-                                     boost::posix_time::milliseconds(15), ec);
-
-      if (ec == boost::asio::error::operation_aborted)
-      {
-        VISENSOR_DEBUG(".");
-        fflush(stdout);
-      }
-      else if(ec)
-      {
-        VISENSOR_DEBUG("Search error: %s", ec.message().c_str());
-      }
-      else
-      {
-        break;
       }
     }
-    //VISENSOR_DEBUG("Received answer from: %s\n", sensor_endpoint_.address().to_string());
+
+    //receive requests
+    boost::system::error_code ec;
+    char data[12];
+
+    //listen to all sensor responses
+    while(ec != boost::asio::error::operation_aborted)
+    {
+      c.receive_from(boost::asio::buffer(data), sensor_endpoint_, boost::posix_time::milliseconds(15), ec);
+      sensor_set.insert( sensor_endpoint_.address().to_string() );
+    }
   }
   catch (std::exception& e)
   {
-    VISENSOR_DEBUG("Exception: %s", e.what());
+    VISENSOR_DEBUG("Autodiscovery exception: %s", e.what());
   }
 
-  VISENSOR_DEBUG("\n");
-  return sensor_endpoint_.address().to_string();
+  //convert sensor set to vector
+  ViDeviceList sensor_list(sensor_set.size());
+  std::copy(sensor_set.begin(), sensor_set.end(), sensor_list.begin());
+
+  //delete null-connections
+  for (unsigned int i=0; i<sensor_list.size(); i++)
+  {
+    if(sensor_list[i] == "0.0.0.0")
+      sensor_list.erase(sensor_list.begin()+i);
+  }
+
+  //debug output
+  VISENSOR_DEBUG("Autodiscovery found the following sensors:\n");
+  if( !sensor_list.empty() )
+  {
+    for (unsigned int i=0; i<sensor_list.size(); i++)
+      VISENSOR_DEBUG("\t %u: %s\n", i, sensor_list[i].c_str());
+
+  } else {
+    VISENSOR_DEBUG("\t no sensors found!\n");
+  }
+
+  return sensor_list;
 }
 
+} //namespace visensor

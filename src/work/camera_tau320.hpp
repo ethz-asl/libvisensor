@@ -12,7 +12,7 @@
 #include <math.h>
 #include <map>
 #include <boost/thread.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/smart_ptr.hpp>
 
 #include "param_server.hpp"
 
@@ -57,7 +57,7 @@ class CameraTau320Config {
 class CameraTau320 : public Camera {
  public:
   CameraTau320(SensorId::SensorId sensor_id, int stream_id,
-               boost::shared_ptr<ConfigConnection> config_connection);
+               IpConnection::WeakPtr config_connection);
   virtual ~CameraTau320();
 
   virtual ViConfigMsg getConfigParam(std::string cmd, uint16_t value);

@@ -1,32 +1,8 @@
 /*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ * time_synchronizer.cpp
  *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ *  Created on: Apr 25, 2012
+ *      Author: burrimi
  */
 
 #include <sys/time.h>
@@ -65,6 +41,7 @@ void TimeSynchronizer::updateTime(uint64_t time_fpga)
 
 void TimeSynchronizer::updateTime(uint64_t time_pc, uint64_t time_fpga)
 {
+//WARNING(schneith): leica code assumes that the clock offset/skew is fixed for all msgs
 
 // detect fpga time wrap around
 //if(time_fpga<_previous_timestamp)
@@ -116,6 +93,7 @@ void TimeSynchronizer::updateTime(uint64_t time_pc, uint64_t time_fpga)
 // returns synchronized time in nanoseconds
 uint64_t TimeSynchronizer::getSynchronizedTime(uint64_t time_fpga)
 {
+  //TODO(schneith): fpga counter will overflow after ~11h (32bit @ 100kHz) --> handle this here?
     return time_fpga+_initial_offset;
 /*
 	// take old offset for messages captured before the update

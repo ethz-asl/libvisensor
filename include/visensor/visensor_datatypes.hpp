@@ -4,17 +4,19 @@
  *
  * All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Redistribution and non-commercial use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *  Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *  Redistributions in binary form must reproduce the above copyright notice, this
+ *  list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *
+ *  Neither the name of the {organization} nor the names of its
+ *  contributors may be used to endorse or promote products derived from
+ *  this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -32,11 +34,13 @@
 #ifndef VISENSOR_DATATYPES_HPP_
 #define VISENSOR_DATATYPES_HPP_
 
-#include <visensor/visensor_config.hpp>
 #include <stdint.h> // for uint32_t definitions
 #include <vector>
-#include <string>
+
 #include <boost/shared_ptr.hpp>
+
+#include <visensor/visensor_config.hpp>
+#include <visensor/visensor_constants.hpp>
 
 namespace visensor {
 
@@ -50,10 +54,10 @@ namespace visensor {
   } ViImageType;
 
   struct DSO_EXPORT ViConfigMsg {
-    uint8_t sensorId; /* id of the sensor */
+    SensorId::SensorId sensorId; /* id of the sensor */
     uint8_t devAdress; /* i2c address of the device */
-    uint16_t reg; /* register to change */
-    uint16_t val; /* new register value */
+    uint32_t reg; /* register to change */
+    uint32_t val; /* new register value */
     uint8_t comType; /* type of communication to the sensor */
     bool valChanged; /* true, if value changed */
 
@@ -97,6 +101,25 @@ namespace visensor {
     typedef boost::shared_ptr<ViImuConfig> Ptr;
   };
 
+  struct DSO_EXPORT ViExternalTriggerConfig {
+    enum direction_e {
+      TRIGGER_OUTPUT=0,
+      TRIGGER_INPUT=1
+    };
+
+    enum polarity_e {
+      TRIGGER_ACTIVE_HIGH=0,
+      TRIGGER_ACTIVE_LOW=1
+    };
+
+    direction_e direction;
+    polarity_e polarity;
+
+    unsigned int pulse_ms; //ms
+
+    typedef boost::shared_ptr<ViExternalTriggerConfig> Ptr;
+  };
+
   struct DSO_EXPORT ViImuMsg {
     double gyro[3]; /* 3D Gyro values (rad/s) */
     double acc[3]; /* 3D acceleration values (m^2/s) */
@@ -105,6 +128,7 @@ namespace visensor {
     double temperature; /* temperature value */
     uint64_t timestamp; /* time of imu message (fpga time)*/
     uint64_t timestamp_host; /* time when imu message was received on host*/
+    uint32_t timestamp_fpga_counter; /* raw fpga counter in "FPGA_TIME_COUNTER_FREQUENCY" Hz */
     uint32_t imu_id; /* id of the imu */
 
     typedef boost::shared_ptr<ViImuMsg> Ptr;
@@ -112,7 +136,11 @@ namespace visensor {
 
   struct DSO_EXPORT ViExternalTriggerMsg {
     uint64_t timestamp; /* time of trigger message (fpga time)*/
-    uint32_t trigger_id; /* id of the imu */
+    uint64_t timestamp_host; /* time when imu message was received on host*/
+    uint32_t timestamp_fpga_counter; /* raw fpga counter in "FPGA_TIME_COUNTER_FREQUENCY" Hz */
+
+    uint32_t trigger_id; /* id of the trigger core */
+    uint32_t event_id; /* id of the trigger event */
 
     typedef boost::shared_ptr<ViExternalTriggerMsg> Ptr;
   };
@@ -137,6 +165,8 @@ namespace visensor {
   struct DSO_EXPORT ViCorner {
     std::vector<ViCornerElem> corners;
     uint64_t timestamp; /* time when the image was captured*/
+    uint64_t timestamp_host; /* time when the data was received on host computer*/
+    uint32_t timestamp_fpga_counter; /* raw fpga counter in "FPGA_TIME_COUNTER_FREQUENCY" Hz */
     uint32_t camera_id; /* the id of the camera */
 
     typedef boost::shared_ptr<ViCorner> Ptr;
@@ -155,6 +185,7 @@ namespace visensor {
     uint32_t height; /* the image height */
     uint64_t timestamp; /* time when the image was captured (fpga time)*/
     uint64_t timestamp_host; /* time when the image was received on host computer*/
+    uint32_t timestamp_fpga_counter; /* raw fpga counter in "FPGA_TIME_COUNTER_FREQUENCY" Hz */
     uint32_t id; /* the frame id */
     uint32_t allocated_image_bytes; /* amount of memory allocated for the *image field. */
     uint32_t camera_id; /* the id of the camera */
@@ -170,12 +201,13 @@ namespace visensor {
 
   struct DSO_EXPORT ViCameraCalibration {
     //intrinsics
-    float focal_point[2];
-    float principal_point[2];
-    float dist_coeff[5];
+    double focal_point[2];
+    double principal_point[2];
+    double dist_coeff[5];
 
     //extrinsics
-    float H[9];
+    double R[9];
+    double t[3];
 
     typedef boost::shared_ptr<ViCameraCalibration> Ptr;
   };
@@ -192,7 +224,14 @@ namespace visensor {
 
     typedef boost::shared_ptr<ViSerialData> Ptr;
   };
+  typedef std::vector<std::string> ViDeviceList;
 
+  //ViSensor error codes
+  enum class ViErrorCodes{
+    NO_ERROR,
+    MEASUREMENT_DROPPED
+  };
+  typedef const ViErrorCodes& ViErrorCode;
 
 }  //namespace visensor
 

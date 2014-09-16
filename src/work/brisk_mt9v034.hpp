@@ -12,7 +12,7 @@
 #include <math.h>
 #include <map>
 #include <boost/thread.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/smart_ptr.hpp>
 
 #include "param_server.hpp"
 

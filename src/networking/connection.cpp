@@ -1,38 +1,9 @@
-/*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
- *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
-
+#include <boost/smart_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/bind.hpp>
 #include <boost/thread.hpp>
+#include <boost/asio.hpp>
 
 #include "visensor/visensor_version.hpp"
 #include "visensor/visensor_exceptions.hpp"
@@ -54,26 +25,10 @@ IpConnection::IpConnection()
 {}
 
 IpConnection::~IpConnection(){
-  data_socket_.close();
-  imu_socket_.close();
-  config_socket_.close();
-  serial_socket_.close();
-  io_service_.stop();
   VISENSOR_DEBUG("connection closed\n");
 }
 
 void IpConnection::connect(std::string sensor_address) {
-  // register the signals to terminate the connection properly
-  // from: http://think-async.com/asio/boost_asio_1_5_1/doc/html/boost_asio/example/http/server4/main.cpp
-  //  boost::asio::signal_set signals(io_service);
-  //  signals.add(SIGINT);
-  //  signals.add(SIGTERM);
-  //#if defined(SIGQUIT)
-  //  signals.add(SIGQUIT);
-  //#endif // defined(SIGQUIT)
-  //  signals.async_wait(boost::bind(
-  //      &boost::asio::io_service::stop, &io_service));
-
   boost::asio::ip::tcp::resolver resolver(io_service_);
 
   try
@@ -139,9 +94,15 @@ void IpConnection::connect(std::string sensor_address) {
   boost::thread bt(boost::bind(&boost::asio::io_service::run, &io_service_));
 }
 
-void IpConnection::registerSerialHost(SerialHost::Ptr serial_host)
+void IpConnection::registerSerialHost(SerialHost::WeakPtr serial_host)
 {
   serial_host_ = serial_host;
+}
+
+SerialHost::Ptr IpConnection::getSerialHostPointer()
+{
+  VISENSOR_ASSERT_COND(serial_host_._empty(), "Register serial host pointer first...!");
+  return serial_host_.lock();
 }
 
 void IpConnection::sendSerialData(ViSerialData::Ptr data_ptr)
@@ -163,11 +124,11 @@ void IpConnection::sendSerialData(ViSerialData::Ptr data_ptr)
   boost::asio::write(serial_socket_, boost::asio::buffer(data_ptr->data));
 }
 
-bool IpConnection::setSerialDelimiter(const char serial_id, const std::string delimiter)
+void IpConnection::setSerialDelimiter(const char serial_id, const std::string delimiter)
 {
   //continue only if we have a client connected
   if(!connected_)
-    return false;
+    return;
 
   //send data over network
   IpComm::Header header;
@@ -180,16 +141,13 @@ bool IpConnection::setSerialDelimiter(const char serial_id, const std::string de
   //write payload (sensor_id + serial_data)
   boost::asio::write(serial_socket_, boost::asio::buffer(&serial_id, 1));
   boost::asio::write(serial_socket_, boost::asio::buffer(delimiter));
-
-  //listen for ACK/NACK
-  return receiveAck(serial_socket_);
 }
 
-bool IpConnection::setSerialBaudrate(const char serial_id, const unsigned int baudrate)
+void IpConnection::setSerialBaudrate(const char serial_id, const unsigned int baudrate)
 {
   //continue only if we have a client connected
   if(!connected_)
-    return false;
+    return;
 
   //send data over network
   IpComm::Header header;
@@ -202,13 +160,10 @@ bool IpConnection::setSerialBaudrate(const char serial_id, const unsigned int ba
   //write payload (sensor_id + serial_data)
   boost::asio::write(serial_socket_, boost::asio::buffer(&serial_id, 1));
   boost::asio::write(serial_socket_, boost::asio::buffer((char*)&baudrate,4));
-
-  //listen for ACK/NACK
-  return receiveAck(serial_socket_);
 }
 
-void IpConnection::addSensor(int sensor_id, Sensor::Ptr sensor) {
-  sensors_.insert(std::pair<int, Sensor::Ptr>(sensor_id, sensor));
+void IpConnection::addSensor(SensorId::SensorId sensor_id, Sensor::Ptr sensor) {
+  sensors_.insert(std::pair<SensorId::SensorId, Sensor::Ptr>(sensor_id, sensor));
 }
 
 void IpConnection::syncTime(){
@@ -280,9 +235,9 @@ void IpConnection::read_handler(const boost::system::error_code& error,
 
     // VISENSOR_DEBUG("header: %d, %d, %d\n", header.timestamp, header.data_size, header.data_id);
 
-
     // allocate memory for new data
     uint8_t timestamp_buffer[4];
+
     uint8_t* data_ptr = new uint8_t[header.data_size-4];
 
     // build receive buffers pointing to allocated memory
@@ -300,8 +255,11 @@ void IpConnection::read_handler(const boost::system::error_code& error,
     {
       // handle errors which happen when terminating the code
       if (receive_error != boost::asio::error::operation_aborted
-          && receive_error != boost::asio::error::bad_descriptor)
-        throw boost::system::system_error(receive_error);
+          || receive_error != boost::asio::error::bad_descriptor)
+      {
+        VISENSOR_DEBUG("Camera server: receive handler aborted due to client shutdown\n");
+        return;
+      }
     }
 
     VISENSOR_ASSERT_COND(nBytesReceived != header.data_size,
@@ -311,19 +269,23 @@ void IpConnection::read_handler(const boost::system::error_code& error,
 
     Measurement::Ptr measurement = boost::make_shared<Measurement>();
     measurement->timestamp = getTimestamp(timestamp_buffer);
+    measurement->timestamp_fpga_counter = getTimestampFpgaRaw(timestamp_buffer)  ; //raw fpga counter timestamp
     measurement->data = data;
+
     measurement->buffer_size = header.data_size-4;
 
-    processPackage(header.data_id, measurement);
+    processPackage(static_cast<SensorId::SensorId>(header.data_id), measurement);
 
     // ready to receive a new data header
     async_read(data_socket_, boost::asio::buffer(data_header_payload_), boost::asio::transfer_all(),
                                 boost::bind(&IpConnection::read_handler, this, boost::asio::placeholders::error,
                                             boost::asio::placeholders::bytes_transferred));
   }
-  else if (error == boost::asio::error::operation_aborted)
+  else if (error == boost::asio::error::operation_aborted || error != boost::asio::error::bad_descriptor)
   {
     // handle errors which happen when terminating the code
+    VISENSOR_DEBUG("Camera server: receive handler aborted due to client shutdown\n");
+    return;
   }
   else
     throw visensor::exceptions::ConnectionException("Connection to sensor lost.");
@@ -358,8 +320,11 @@ void IpConnection::imu_read_handler(const boost::system::error_code& error,
     {
       // handle errors which happen when terminating the code
       if (receive_error != boost::asio::error::operation_aborted
-          && receive_error != boost::asio::error::bad_descriptor)
-        throw boost::system::system_error(receive_error);
+          || receive_error != boost::asio::error::bad_descriptor)
+      {
+        VISENSOR_DEBUG("Imu server: receive handler aborted due to client shutdown\n");
+        return;
+      }
     }
 
     VISENSOR_ASSERT_COND(nBytesReceived != header.data_size,
@@ -370,18 +335,21 @@ void IpConnection::imu_read_handler(const boost::system::error_code& error,
     // fill data into measurement
     Measurement::Ptr measurement( new Measurement() );
     measurement->timestamp = getTimestamp(timestamp_buffer);
+    measurement->timestamp_fpga_counter = getTimestampFpgaRaw(timestamp_buffer)  ; //raw fpga counter timestamp
     measurement->data = data;
     measurement->buffer_size = header.data_size-4;
 
-    processPackage(header.data_id, measurement);
+    processPackage(static_cast<SensorId::SensorId>(header.data_id), measurement);
 
     async_read(imu_socket_, boost::asio::buffer(imu_header_payload_), boost::asio::transfer_all(),
                                 boost::bind(&IpConnection::imu_read_handler, this, boost::asio::placeholders::error,
                                             boost::asio::placeholders::bytes_transferred));
   }
-  else if (error == boost::asio::error::operation_aborted)
+  else if (error == boost::asio::error::operation_aborted || error != boost::asio::error::bad_descriptor)
   {
     // handle errors which happen when terminating the code
+    VISENSOR_DEBUG("Imu server: receive handler aborted due to client shutdown\n");
+    return;
   }
   else
     throw visensor::exceptions::ConnectionException("Connection to sensor lost.");
@@ -398,10 +366,22 @@ void IpConnection::serial_read_handler(const boost::system::error_code& error,
                     sizeof(serial_header_payload_));
 
     //receive payload
+    boost::system::error_code receive_error;
     IpComm::Header header(serial_header_payload_);
     std::vector<char> body_payload;
     body_payload.resize(header.data_size);
-    boost::asio::read(serial_socket_, boost::asio::buffer(body_payload));
+    boost::asio::read(serial_socket_, boost::asio::buffer(body_payload), boost::asio::transfer_all(), receive_error);
+
+    if(receive_error)
+    {
+      // handle errors which happen when terminating the code
+      if (receive_error != boost::asio::error::operation_aborted
+          || receive_error != boost::asio::error::bad_descriptor)
+      {
+        VISENSOR_DEBUG("Serial server: receive handler aborted due to client shutdown\n");
+        return;
+      }
+    }
 
     switch(header.data_id)
     {
@@ -412,9 +392,9 @@ void IpConnection::serial_read_handler(const boost::system::error_code& error,
        msg_ptr->port_id = (uint32_t)body_payload[0];//first byte is the serial port id
        msg_ptr->data = std::string(body_payload.begin()+1, body_payload.end());
 
-       //add to publishing queue (if serial_host is registered)
-       if(serial_host_!=NULL)
-         serial_host_->addDataToPublishQueue(msg_ptr);
+       //add to publishing queue
+       if(!serial_host_._empty())
+         getSerialHostPointer()->addDataToPublishQueue(msg_ptr);
 
        //VISENSOR_DEBUG("serial port %u: %s", msg_ptr->port_id, msg_ptr->data.c_str());
        break;
@@ -431,9 +411,11 @@ void IpConnection::serial_read_handler(const boost::system::error_code& error,
                                 boost::bind(&IpConnection::serial_read_handler, this, boost::asio::placeholders::error,
                                             boost::asio::placeholders::bytes_transferred));
   }
-  else if (error == boost::asio::error::operation_aborted)
+  else if (error == boost::asio::error::operation_aborted || error != boost::asio::error::bad_descriptor)
   {
     // handle errors which happen when terminating the code
+    VISENSOR_DEBUG("Serial server: receive handler aborted due to client shutdown\n");
+    return;
   }
   else
     throw visensor::exceptions::ConnectionException("Connection to sensor lost."); // Some other error.
@@ -449,7 +431,7 @@ bool IpConnection::sendHeader(int identifier) {
   return true;
 }
 
-void IpConnection::sendStartSensor(int sensor_id, uint32_t rate) {
+void IpConnection::sendStartSensor(SensorId::SensorId sensor_id, uint32_t rate) {
   // send start package header + payload (id+rate)
   IpComm::Header header;
   header.data_id = IpComm::START_SENSOR;
@@ -466,7 +448,7 @@ void IpConnection::sendStartSensor(int sensor_id, uint32_t rate) {
   boost::asio::write(config_socket_, buffers);
 }
 
-void IpConnection::sendStopSensor(int sensor_id) {
+void IpConnection::sendStopSensor(SensorId::SensorId sensor_id) {
   IpComm::Header header;
   header.data_id = IpComm::STOP_SENSOR;
   header.data_size = 0;
@@ -580,14 +562,14 @@ void IpConnection::readFpgaInfo()
   fpga_config_.firmware_version_major = config.firmwareVersionMajor;
   fpga_config_.firmware_version_minor = config.firmwareVersionMinor;
   fpga_config_.firmware_version_patch = config.firmwareVersionPatch;
-  fpga_config_.num_of_streams_ = config.numOfStreams;
+  fpga_config_.num_of_sensors_ = config.numOfSensors;
 
   VISENSOR_DEBUG("FPGA ID: fpgaId %d, Firmware Version: %d.%d.%d Data Streams: %d\n",
          fpga_config_.fpga_id_, fpga_config_.firmware_version_major,
          fpga_config_.firmware_version_minor,
-         fpga_config_.firmware_version_patch, fpga_config_.num_of_streams_);
+         fpga_config_.firmware_version_patch, fpga_config_.num_of_sensors_);
 
-  number_of_streams_=fpga_config_.num_of_streams_;
+  number_of_sensors_=fpga_config_.num_of_sensors_;
 }
 
 std::vector<IpComm::SensorInfo> IpConnection::getAttachedSensors()
@@ -597,16 +579,16 @@ std::vector<IpComm::SensorInfo> IpConnection::getAttachedSensors()
   sendHeader(IpComm::REQUEST_SENSOR_INFO);
 
   IpComm::Header header = readHeader(config_socket_);
-  if(header.data_id != IpComm::SENSOR_INFO && header.data_size != number_of_streams_)
+  if(header.data_id != IpComm::SENSOR_INFO && header.data_size != number_of_sensors_)
   {
     VISENSOR_DEBUG("read init msg failed");
     return sensor_list;
   }
 
-  if(number_of_streams_==0)
+  if(number_of_sensors_==0)
     return sensor_list;
 
-  for(int i=0;i<number_of_streams_;++i)
+  for(int i=0;i<number_of_sensors_;++i)
   {
     // read sensor infos from socket
     IpComm::SensorInfoPayload sensor_info_payload;
@@ -619,7 +601,7 @@ std::vector<IpComm::SensorInfo> IpConnection::getAttachedSensors()
   return sensor_list;
 }
 
-bool IpConnection::readCameraCalibration(unsigned int cam_id, unsigned int slot_id, ViCameraCalibration &calib_out)
+bool IpConnection::readCameraCalibration(SensorId::SensorId cam_id, unsigned int slot_id, ViCameraCalibration &calib_out)
 {
   //request calibration with given id
   IpComm::Header header;
@@ -652,12 +634,13 @@ bool IpConnection::readCameraCalibration(unsigned int cam_id, unsigned int slot_
   for(int i=0; i<2; i++) calib_out.focal_point[i] = calib.focal_point[i];
   for(int i=0; i<2; i++) calib_out.principal_point[i] = calib.principal_point[i];
   for(int i=0; i<5; i++) calib_out.dist_coeff[i] = calib.distortion[i];
-  for(int i=0; i<9; i++) calib_out.H[i] = calib.H[i];
+  for(int i=0; i<9; i++) calib_out.R[i] = calib.R[i];
+  for(int i=0; i<3; i++) calib_out.t[i] = calib.t[i];
 
   return true;
 }
 
-bool IpConnection::writeCameraCalibration(unsigned int cam_id, unsigned int slot_id, const ViCameraCalibration calib)
+bool IpConnection::writeCameraCalibration(SensorId::SensorId cam_id, unsigned int slot_id, const ViCameraCalibration calib)
 {
   //send calibration write request
   IpComm::Header header;
@@ -673,7 +656,8 @@ bool IpConnection::writeCameraCalibration(unsigned int cam_id, unsigned int slot
   for(int i=0; i<2; i++) package_calib.focal_point[i] = calib.focal_point[i];
   for(int i=0; i<2; i++) package_calib.principal_point[i] = calib.principal_point[i];
   for(int i=0; i<5; i++) package_calib.distortion[i] = calib.dist_coeff[i];
-  for(int i=0; i<9; i++) package_calib.H[i] = calib.H[i];
+  for(int i=0; i<9; i++) package_calib.R[i] = calib.R[i];
+  for(int i=0; i<3; i++) package_calib.t[i] = calib.t[i];
 
   boost::asio::write(config_socket_, boost::asio::buffer(header.getSerialized()));
   boost::asio::write(config_socket_, boost::asio::buffer(package_id.getSerialized()));
@@ -697,27 +681,54 @@ bool IpConnection::sendLedConfig(bool value)
   return writeDataFpga(led_sensor_id_, 0x00, value);
 }
 
+void IpConnection::sendExternalTriggerConfig(SensorId::SensorId sensor_id, const ViExternalTriggerConfig config)
+{
 
-void IpConnection::startSensor(uint8_t sensor_id, uint32_t rate)
+  //from FpgaConstants.hpp (server file)
+  const unsigned int R_EX_TRIGGER_CONTROL      = 0x00; // 0=OFF, 1=ON
+  const unsigned int R_EX_TRIGGER_DIRECTION    = 0x04; // 0=out, 1=in
+  const unsigned int R_EX_TRIGGER_POLARITY     = 0x08; // 0=active high, 1=active low
+  const unsigned int R_EX_TRIGGER_LENGHT       = 0x0C; // impulse length in fpga zyklen (125MHz)
+
+
+  //get trigger core status
+  int core_running=1;
+  readDataFpga(sensor_id, R_EX_TRIGGER_CONTROL, core_running);
+
+  //turn core off, if running
+  if(core_running != 0)
+    writeDataFpga(sensor_id, R_EX_TRIGGER_CONTROL, 0);
+
+  //set config
+  writeDataFpga(sensor_id, R_EX_TRIGGER_POLARITY, (int)config.polarity);        //polarity
+  writeDataFpga(sensor_id, R_EX_TRIGGER_DIRECTION, (int)config.direction);      //direction
+  writeDataFpga(sensor_id, R_EX_TRIGGER_LENGHT, (int)FPGA_FREQUENCY/1000 * config.pulse_ms);  //pulse width (ms)
+
+  //turn core back on, if it was running
+  if(core_running != 0)
+    writeDataFpga(sensor_id, R_EX_TRIGGER_CONTROL, 1);
+}
+
+void IpConnection::startSensor(SensorId::SensorId sensor_id, uint32_t rate)
 {
   VISENSOR_DEBUG("starting sensor id %u rate %u\n",sensor_id,rate);
   sendStartSensor(sensor_id, rate);
 }
 
-void IpConnection::stopSensor(uint8_t sensor_id)
+void IpConnection::stopSensor(SensorId::SensorId sensor_id)
 {
   VISENSOR_DEBUG("stop sensor id %u\n", sensor_id);
   sendStopSensor(sensor_id);
 }
 
 template <typename T>
-bool IpConnection::writeDataUbi(unsigned char sens_addr, unsigned char reg,
+bool IpConnection::writeDataUbi(SensorId::SensorId sens_addr, unsigned char reg,
                                  T val, int numBits) {
   IpComm::Header header;
   header.data_id = IpComm::WRITE_UBI_REGISTER;
   //VISENSOR_DEBUG("send header id: %d register: %d, val: %d\n", header.data_id, reg, val);
   IpComm::BusPackage package;
-  package.streamNumber = sens_addr;
+  package.sensor_id = sens_addr;
   package.NumBits = numBits;
   package.registerAddress = reg;
   package.value = val;
@@ -727,13 +738,13 @@ bool IpConnection::writeDataUbi(unsigned char sens_addr, unsigned char reg,
   return true;
 }
 
-bool IpConnection::writeDataFpga(unsigned char sens_addr, unsigned char reg,
+bool IpConnection::writeDataFpga(SensorId::SensorId sens_addr, unsigned char reg,
                                  int val) {
   IpComm::Header header;
   header.data_id = IpComm::WRITE_FPGA_REGISTER;
-  //VISENSOR_DEBUG("send header id: %d register: %d, val: %d\n", header.data_id, reg, val);
+  VISENSOR_DEBUG("write data fpga register: 0x%x, val: %u\n", reg, val);
   IpComm::BusPackage package;
-  package.streamNumber = sens_addr;
+  package.sensor_id = sens_addr;
   package.NumBits = 32;
   package.registerAddress = reg;
   package.value = val;
@@ -744,14 +755,14 @@ bool IpConnection::writeDataFpga(unsigned char sens_addr, unsigned char reg,
 }
 
 template <typename T>
-bool IpConnection::readDataUbi(unsigned char sens_addr, unsigned char reg,
+bool IpConnection::readDataUbi(SensorId::SensorId sens_addr, unsigned char reg,
                                  T *val, int numBits) {
   // formulate request
   IpComm::Header headerOut;
   headerOut.data_id = IpComm::READ_UBI_REGISTER;
 
   IpComm::BusPackage packageOut;
-  packageOut.streamNumber = sens_addr;
+  packageOut.sensor_id = sens_addr;
   packageOut.NumBits = numBits;
   packageOut.registerAddress = reg;
 
@@ -772,14 +783,14 @@ bool IpConnection::readDataUbi(unsigned char sens_addr, unsigned char reg,
   return true;
 }
 
-bool IpConnection::readDataFpga(unsigned char sens_addr, unsigned char reg,
+bool IpConnection::readDataFpga(SensorId::SensorId sens_addr, unsigned char reg,
                                  int &val) {
   // formulate request
   IpComm::Header headerOut;
   headerOut.data_id = IpComm::READ_FPGA_REGISTER;
 
   IpComm::BusPackage packageOut;
-  packageOut.streamNumber = sens_addr;
+  packageOut.sensor_id = sens_addr;
   packageOut.NumBits = 32;
   packageOut.registerAddress = reg;
 
@@ -800,20 +811,25 @@ bool IpConnection::readDataFpga(unsigned char sens_addr, unsigned char reg,
   return true;
 }
 
-void IpConnection::writeConfig(uint8_t sensor_id, uint8_t dev_adress, uint8_t reg, uint16_t val, uint8_t comType)
+void IpConnection::writeConfig(SensorId::SensorId sensor_id, uint8_t dev_adress, uint8_t reg, uint32_t val, uint8_t comType)
 {
   if(comType==ViComType::I2C_16)
     writeDataUbi(sensor_id, reg, val, 16);//writeDataU16_i2c(sensors_.at(sensor_id)->stream_number_, dev_adress,reg,val);
   if(comType==ViComType::I2C_8)
     writeDataUbi(sensor_id, reg, val, 8);
+  if(comType==ViComType::FPGA_32)
+    writeDataFpga(sensor_id, reg, val);
 }
 
-void IpConnection::readConfig(uint8_t sensor_id, uint8_t dev_adress, uint8_t reg, uint16_t &val, uint8_t comType)
+void IpConnection::readConfig(SensorId::SensorId sensor_id, uint8_t dev_adress, uint8_t reg, uint32_t &val, uint8_t comType)
 {
   if(comType==ViComType::I2C_16)
     readDataUbi(sensor_id, reg, &val, 16);
   if(comType==ViComType::I2C_8)
     readDataUbi(sensor_id, reg, &val, 8);
+  // TODO(gohl): implement fpga read
+//  if(comType==ViComType::FPGA_32)
+//    readDataFpga(sensor_id, reg, &val);
 }
 
 bool IpConnection::readInitMsg(unsigned char * msg)
@@ -827,18 +843,23 @@ bool IpConnection::readInitMsg(unsigned char * msg)
 return true;
 }
 
+uint32_t IpConnection::getTimestampFpgaRaw(uint8_t* buffer)
+{
+  return (buffer[0]<<24) | (buffer[1]<<16) | (buffer[2]<<8) | (buffer[3]<<0);
+}
+
 uint64_t IpConnection::getTimestamp(uint8_t* buffer)
 {
   //read timestamp  from buffer
-  uint64_t packageTimestamp=(buffer[0]<<24) | (buffer[1]<<16) | (buffer[2]<<8) | (buffer[3]<<0);
+  uint32_t packageTimestampRaw = getTimestampFpgaRaw(buffer);
 
   // FPGA timestamp is in 1/100000[s] -> change to nanoseconds
-  uint64_t timestamp=time_synchronizer_.getSynchronizedTime(packageTimestamp*10000);
+  uint64_t timestamp=time_synchronizer_.getSynchronizedTime((uint64_t)packageTimestampRaw*10000);
 
   return timestamp;
 }
 
-void IpConnection::processPackage(uint8_t sensor_id, Measurement::Ptr new_measurement)
+void IpConnection::processPackage(SensorId::SensorId sensor_id, Measurement::Ptr new_measurement)
 {
 
 //  VISENSOR_DEBUG("Payload: ");
@@ -850,7 +871,6 @@ void IpConnection::processPackage(uint8_t sensor_id, Measurement::Ptr new_measur
 //    VISENSOR_DEBUG("%02x",pkt_data[i]);
 //  }
 //  VISENSOR_DEBUG("\n");
-
 
   if(sensors_.count(sensor_id) == 0)
   {
@@ -873,7 +893,11 @@ void IpConnection::processPackage(uint8_t sensor_id, Measurement::Ptr new_measur
   {
     if (sensor->getMeasurementBufferSize()
         > (int)new_measurement->buffer_size) {
-      VISENSOR_DEBUG("message smaller than expected\n");
+      VISENSOR_DEBUG(
+                  "sensor message smaller than expected. Got %u expected %u. sensor_id: %u\n",
+                  new_measurement->buffer_size,
+                  sensor->getMeasurementBufferSize()
+                      * sensor->getNumOfMsgsInPackage(), sensor_id);
       return;
     }
     new_measurement->timestamp_host = time_synchronizer_.getSystemTime();
@@ -881,11 +905,14 @@ void IpConnection::processPackage(uint8_t sensor_id, Measurement::Ptr new_measur
   }
   else{
     // split the new measurement into single measurements
-    for (int i = 0; i < sensor->getNumOfMsgsInPackage(); i++)
+    for (int64_t i = 0; i < sensor->getNumOfMsgsInPackage(); i++) // TODO(schneith): make getNumOfMsgsInPackage dynamic
     {
-      if (sensor->getMeasurementBufferSize() * (i)
-          >= (int)new_measurement->buffer_size) {
-        VISENSOR_DEBUG("imu message smaller than expected\n");
+      if (sensor->getMeasurementBufferSize() * (i) >= new_measurement->buffer_size) {
+        VISENSOR_DEBUG(
+            "imu message smaller than expected. Got %u expected %u.\n",
+            new_measurement->buffer_size,
+            sensor->getMeasurementBufferSize()
+                * sensor->getNumOfMsgsInPackage());
         return;
       }
 
@@ -897,6 +924,10 @@ void IpConnection::processPackage(uint8_t sensor_id, Measurement::Ptr new_measur
       single_measurement->buffer_size = sensor->getMeasurementBufferSize();
       single_measurement->timestamp = new_measurement->timestamp + i*sensor->getTimeBetweenMsgs();
       single_measurement->timestamp_host = time_synchronizer_.getSystemTime() + i*sensor->getTimeBetweenMsgs();
+
+      //fpga timestamp
+      uint64_t time_offset_fpga = (i*sensor->getTimeBetweenMsgs() * (uint64_t)FPGA_TIME_COUNTER_FREQUENCY)/(uint64_t)1e9;
+      single_measurement->timestamp_fpga_counter = new_measurement->timestamp_fpga_counter + time_offset_fpga;
 
       sensor->addMeasurement(single_measurement);
     }

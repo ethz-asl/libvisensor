@@ -9,7 +9,7 @@
 
 namespace visensor
 {
-CameraTau320::CameraTau320(SensorId::SensorId sensor_id, int stream_id, boost::shared_ptr<ConfigConnection> config_connection):
+CameraTau320::CameraTau320(SensorId::SensorId sensor_id, int stream_id, IpConnection::WeakPtr config_connection):
 				Camera(camera_id, ViCameraConfig(
 						CameraTau320Defaults::WIDTH, CameraTau320Defaults::HEIGHT, CameraTau320Defaults::RATE),
 						SensorSettings(sensor_id,SensorType::SensorType::CAMERA_TAU320,calculateBufferSize(),

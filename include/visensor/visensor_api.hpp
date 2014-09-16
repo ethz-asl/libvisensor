@@ -4,17 +4,19 @@
  *
  * All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Redistribution and non-commercial use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *  Redistributions of source code must retain the above copyright notice, this
+ *  list of conditions and the following disclaimer.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *  Redistributions in binary form must reproduce the above copyright notice, this
+ *  list of conditions and the following disclaimer in the documentation and/or
+ *  other materials provided with the distribution.
+ *
+ *  Neither the name of the {organization} nor the names of its
+ *  contributors may be used to endorse or promote products derived from
+ *  this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -28,7 +30,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
 #ifndef VISENSOR_API_HPP_
 #define VISENSOR_API_HPP_
 
@@ -52,7 +53,13 @@ class DSO_EXPORT ViSensorDriver {
   ViSensorDriver();
   ~ViSensorDriver();
 
-  void init(); //init using autodiscovery
+  //get list of all ViSensors connected to the network
+  void getAutoDiscoveryDeviceList(ViDeviceList &hostname_list);
+
+  //init using autodiscovery (first sensor that responded, returns its ip)
+  std::string init();
+
+  //connect to specific host/ip address
   void init(std::string host_ip);
 
   void startSensor(visensor::SensorId::SensorId sensor_id, uint32_t rate =
@@ -62,44 +69,44 @@ class DSO_EXPORT ViSensorDriver {
                             int value);
 
   void startAllCameras(uint32_t rate = CAMERA_FREQUENCY);
-  void setCameraCallback(boost::function<void(ViFrame::Ptr)> callback);
+  void setCameraCallback(boost::function<void(ViFrame::Ptr, ViErrorCode)> callback);
 
   void startAllCorners();
-  void setCornerCallback(boost::function<void(ViCorner::Ptr)> callback);
+  void setCornerCallback(boost::function<void(ViCorner::Ptr, ViErrorCode)> callback);
 
   void startAllImus(uint32_t rate = IMU_FREQUENCY);
-  void setImuCallback(boost::function<void(ViImuMsg::Ptr)> callback);
+  void setImuCallback(boost::function<void(ViImuMsg::Ptr, ViErrorCode)> callback);
 
   void startAllExternalTriggers(uint32_t rate);
-  void setExternalTriggerCallback(
-      boost::function<void(ViExternalTriggerMsg::Ptr)> callback);
+  void setExternalTriggerCallback(boost::function<void(ViExternalTriggerMsg::Ptr)> callback);
+  void setExternalTriggerConfig(const ViExternalTriggerConfig config);
 
   void startAllDenseMatchers();
-  void setDenseMatcherCallback(
-      boost::function<void(ViFrame::Ptr)> callback);
+  void setDenseMatcherCallback(boost::function<void(ViFrame::Ptr, ViErrorCode)> callback);
 
   // is called with synchronized images and corresponding corners
-  void setFramesCornersCallback(
-      boost::function<void(ViFrame::Ptr, ViCorner::Ptr)> callback);
+  void setFramesCornersCallback(boost::function<void(ViFrame::Ptr, ViCorner::Ptr)> callback);
 
-  std::vector<int> getListOfCameraIDs() const;
-  std::vector<int> getListOfDenseIDs() const;
-  std::vector<int> getListOfCornerIDs() const;
-  std::vector<int> getListOfImuIDs() const;
+  std::vector<SensorId::SensorId> getListOfSensorIDs() const;
+  std::vector<SensorId::SensorId> getListOfCameraIDs() const;
+  std::vector<SensorId::SensorId> getListOfDenseIDs() const;
+  std::vector<SensorId::SensorId> getListOfCornerIDs() const;
+  std::vector<SensorId::SensorId> getListOfImuIDs() const;
+  std::vector<SensorId::SensorId> getListOfTriggerIDs() const;
   uint32_t getFpgaId() const;
 
-  //slot 0 holds the factory calibration (and can't be overwritten using the public API)
-  bool getCameraCalibration(unsigned int cam_id, ViCameraCalibration& calib, unsigned int slot_id=0) const;
-  bool setCameraCalibration(unsigned int cam_id, const ViCameraCalibration calib, unsigned int slot_id=1) const;
+  //slot 0 holds the factory calibration (and can't be overwritten using the public API, use the calibration tool instead)
+  bool getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration& calib, int slot_id=0) const;
+  bool setCameraCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, int slot_id=1) const;
+  bool setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib) const;
+  void setCameraCalibrationSlot(int slot_id);
+  int getCameraCalibrationSlot();
 
   //serial port bridge
   void sendSerialData(ViSerialData::Ptr data) const;
   void setSerialCallback(boost::function<void(ViSerialData::Ptr)> callback);
-  bool setSerialDelimiter(const char serial_id, const std::string delimiter) const;
-  bool setSerialBaudrate(const char serial_id, const unsigned int baudrate) const;
-
-  //led configuration
-  bool setLedConfigParam(const std::string cmd, uint16_t value);
+  void setSerialDelimiter(const char serial_id, const std::string delimiter) const;
+  void setSerialBaudrate(const char serial_id, const unsigned int baudrate) const;
 
   //file transfer
   void downloadFile(std::string local_path, std::string remote_path);
@@ -109,6 +116,9 @@ class DSO_EXPORT ViSensorDriver {
   class Impl;
   Impl* pImpl_;
 
+ public:
+  //private API access
+  Impl* getPrivateApiAccess() { return pImpl_; }
 };
 }  //namespace visensor
 

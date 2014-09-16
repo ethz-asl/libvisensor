@@ -18,7 +18,7 @@ const bool USE_CONST_PACKAGE_SIZE=true;
 
 class ImuAdis16488 : public Imu {
 public:
-	ImuAdis16488(SensorId::SensorId sensor_id, int stream_id, boost::shared_ptr<ConfigConnection> config_connection);
+	ImuAdis16488(SensorId::SensorId sensor_id, int stream_id, IpConnection::WeakPtr config_connection);
 	virtual ~ImuAdis16488(){};
 
 	virtual ViConfigMsg getConfigParam(std::string cmd, uint16_t value);

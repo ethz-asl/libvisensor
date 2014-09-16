@@ -1,40 +1,17 @@
 /*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ * corner_mt9v034.hpp
  *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ *  Created on: Apr 18, 2012
+ *      Author: burrimi
  */
 
 #ifndef CORNER_MT9V034_HPP_
 #define CORNER_MT9V034_HPP_
 
 #include <config/config.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/smart_ptr.hpp>
 
+#include "networking/connection.hpp"
 #include "networking/param_server.hpp"
 #include "sensors/corner_detector.hpp"
 
@@ -60,7 +37,7 @@ const bool USE_CONST_PACKAGE_SIZE=false;
 class CornerMt9v034Config
 {
 public:
-  CornerMt9v034Config(const uint8_t sensorId)
+  CornerMt9v034Config(const SensorId::SensorId sensorId)
       : sensor_id_(sensorId) {
   }
 
@@ -86,17 +63,17 @@ public:
 
 private:
   param_server::ParamServer param_server_;
-  const uint8_t sensor_id_;
+  const SensorId::SensorId sensor_id_;
 };
 
 class CornerMt9v034 : public CornerDetector{
 public:
   typedef boost::shared_ptr<CornerMt9v034> Ptr;
 
-	CornerMt9v034(SensorId::SensorId sensor_id, int stream_id, boost::shared_ptr<ConfigConnection> config_connection);
+	CornerMt9v034(SensorId::SensorId sensor_id, IpConnection::WeakPtr config_connection);
 	virtual ~CornerMt9v034();
 
-	virtual ViConfigMsg getConfigParam(std::string cmd, uint16_t value);
+	virtual ViConfigMsg getConfigParam(std::string cmd, uint32_t value);
 	//the threaded function that works on the queue of finished measurements
 	void processMeasurements();
 	bool getCornerElem(uint8_t* buf, ViCornerElem& corner);

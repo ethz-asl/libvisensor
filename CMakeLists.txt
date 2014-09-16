@@ -1,6 +1,24 @@
 #Thomas Schneider, 2/12/2013
+#Pascal Gohl, 21/08/2014
 cmake_minimum_required(VERSION 2.8.0)
- 
+
+############
+# CATKIN STUFF
+############
+project(libvisensor)
+
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+find_package(Eigen REQUIRED)
+
+if(NOT DEFINED DONT_USE_CATKIN)
+find_package(catkin QUIET)
+catkin_package(
+  INCLUDE_DIRS include ${catkin_INCLUDE_DIRS}
+  CATKIN_DEPENDS
+  LIBRARIES visensor
+)
+endif()
+
 ############
 # SETTINGS
 ############
@@ -20,25 +38,32 @@ FILE(
   src/synchronization/*.cpp
   src/serial_bridge/*.cpp
   src/visensor/*.cpp
-) 
-INCLUDE_DIRECTORIES("include") 
+  src/helpers/*.cpp
+)
+INCLUDE_DIRECTORIES("include")
+include_directories(${EIGEN_INCLUDE_DIR})
 
 #Release / debug build
+if(NOT DEFINED CMAKE_BUILD_TYPE)
 set(CMAKE_BUILD_TYPE Release)
 ADD_DEFINITIONS (-DVISENSOR_EXPORT -march=native -fPIC -O2 -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden) #Release
 
 #set(CMAKE_BUILD_TYPE Debug)
 #ADD_DEFINITIONS (-DVISENSOR_EXPORT -march=native -fPIC -O0 -g3 -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden) #Debug
+else(NOT DEFINED CMAKE_BUILD_TYPE)
+ADD_DEFINITIONS (-DVISENSOR_EXPORT -march=native -fPIC -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden) #Release
+endif(NOT DEFINED CMAKE_BUILD_TYPE)
+
 
 #shared library
 ADD_LIBRARY(${PKGNAME} SHARED ${SRCS})
 SET_TARGET_PROPERTIES(${PKGNAME} PROPERTIES OUTPUT_NAME ${PKGNAME})
-TARGET_LINK_LIBRARIES(${PKGNAME} boost_thread-mt boost_system) 
+TARGET_LINK_LIBRARIES(${PKGNAME} boost_thread boost_system) 
 
 #static library
 ADD_LIBRARY(${PKGNAME}_static STATIC ${SRCS})
 SET_TARGET_PROPERTIES(${PKGNAME}_static PROPERTIES OUTPUT_NAME ${PKGNAME})
-TARGET_LINK_LIBRARIES(${PKGNAME}_static boost_thread-mt boost_system) 
+TARGET_LINK_LIBRARIES(${PKGNAME}_static boost_thread boost_system) 
 
 ###########
 # INSTALL

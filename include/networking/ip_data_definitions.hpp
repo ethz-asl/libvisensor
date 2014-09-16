@@ -1,32 +1,8 @@
 /*
- * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
- * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ * ip_data_definitions.hpp
  *
- * All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ *  Created on: Aug 22, 2013
+ *      Author: pascal
  */
 
 #ifndef IP_DATA_DEFINITIONS_HPP_
@@ -36,10 +12,6 @@
 #ifdef VISENSOR_EXPORT
 # include <config/config.hpp>
 #endif
-
-#ifdef __APPLE__
-  #include "networking/endian.h" // compatibility header for endian.h
-#endif	/* __APPLE__ */
 
 #include <netinet/in.h> //for ntohl() and htonl()
 #include <boost/array.hpp>
@@ -120,7 +92,7 @@ struct FpgaInfo
   uint32_t firmwareVersionMajor;
   uint32_t firmwareVersionMinor;
   uint32_t firmwareVersionPatch;
-  uint32_t numOfStreams;
+  uint32_t numOfSensors;
 
   FpgaInfo() {
     timestamp = 0;
@@ -128,7 +100,7 @@ struct FpgaInfo
     firmwareVersionMajor = 0;
     firmwareVersionMinor = 0;
     firmwareVersionPatch = 0;
-    numOfStreams = 0;
+    numOfSensors = 0;
   }
 
   FpgaInfo(FpgaInfoPayload fpgainfo_payload) {
@@ -142,7 +114,7 @@ struct FpgaInfo
     fpgainfo_payload[2] = htonl(firmwareVersionMajor);
     fpgainfo_payload[3] = htonl(firmwareVersionMinor);
     fpgainfo_payload[4] = htonl(firmwareVersionPatch);
-    fpgainfo_payload[5] = htonl(numOfStreams);
+    fpgainfo_payload[5] = htonl(numOfSensors);
     return fpgainfo_payload;
   }
 
@@ -152,7 +124,7 @@ struct FpgaInfo
     firmwareVersionMajor = ntohl(fpgainfo_payload[2]);
     firmwareVersionMinor = ntohl(fpgainfo_payload[3]);
     firmwareVersionPatch = ntohl(fpgainfo_payload[4]);
-    numOfStreams = ntohl(fpgainfo_payload[5]);
+    numOfSensors = ntohl(fpgainfo_payload[5]);
   }
 };
 
@@ -184,12 +156,10 @@ struct StartSensor
 typedef boost::array<uint32_t, 3> SensorInfoPayload;
 struct SensorInfo
 {
-  uint32_t stream_number;
   uint32_t sensor_type;
   uint32_t sensor_id;
 
   SensorInfo(){
-    stream_number = 0;
     sensor_type = 0;
     sensor_id = 0;
   }
@@ -200,29 +170,27 @@ struct SensorInfo
 
   SensorInfoPayload getSerialized() {
     SensorInfoPayload sensor_info_payload;
-    sensor_info_payload[0]=htonl(stream_number);
-    sensor_info_payload[1]=htonl(sensor_type);
-    sensor_info_payload[2]=htonl(sensor_id);
+    sensor_info_payload[0]=htonl(sensor_type);
+    sensor_info_payload[1]=htonl(sensor_id);
     return sensor_info_payload;
   }
 
   void setSerialized(SensorInfoPayload sensor_info_payload) {
-    stream_number=ntohl(sensor_info_payload[0]);
-    sensor_type=ntohl(sensor_info_payload[1]);
-    sensor_id=ntohl(sensor_info_payload[2]);
+    sensor_type=ntohl(sensor_info_payload[0]);
+    sensor_id=ntohl(sensor_info_payload[1]);
   }
 };
 
 typedef boost::array<uint32_t, 4> BusPackagePayload;
 struct BusPackage
 {
-  uint32_t streamNumber;
+  uint32_t sensor_id;
   uint32_t NumBits; // 8 or 16 Bit
   uint32_t registerAddress;  // always 8 Bit
   uint32_t value;
 
   BusPackage(){
-    streamNumber = 0;
+    sensor_id = 0;
     NumBits = 0;
     registerAddress = 0;
     value = 0;
@@ -234,7 +202,7 @@ struct BusPackage
 
   BusPackagePayload getSerialized() {
     BusPackagePayload busPackagePayload;
-    busPackagePayload[0]=htonl(streamNumber);
+    busPackagePayload[0]=htonl(sensor_id);
     busPackagePayload[1]=htonl(NumBits);
     busPackagePayload[2]=htonl(registerAddress);
     busPackagePayload[3]=htonl(value);
@@ -242,7 +210,7 @@ struct BusPackage
   }
 
   void setSerialized(BusPackagePayload sendor_info_payload) {
-    streamNumber=ntohl(sendor_info_payload[0]);
+    sensor_id=ntohl(sendor_info_payload[0]);
     NumBits=ntohl(sendor_info_payload[1]);
     registerAddress=ntohl(sendor_info_payload[2]);
     value=ntohl(sendor_info_payload[3]);
@@ -266,7 +234,7 @@ struct TimeSync
 
   TimeSyncPayload getSerialized() {
     TimeSyncPayload time_sync_payload;
-    time_sync_payload[0]=htobe64(host_time);
+    time_sync_payload[0]=htobe64(host_time); //TODO(gohlp): find OSX compatible equivalent for htobe64
     time_sync_payload[1]=htobe64(fpga_time);
     return time_sync_payload;
   }
@@ -303,28 +271,30 @@ struct CalibrationId {
   }
 };
 
-typedef boost::array<uint64_t, 19> CameraCalibrationPayload;
+typedef boost::array<uint64_t, 22> CameraCalibrationPayload;
 struct CameraCalibration {
 
   //intrinsics
-  float focal_point[2];
-  float principal_point[2];
+  double focal_point[2];
+  double principal_point[2];
 
   //distortion
-  float distortion[5];
+  double distortion[5];
 
   //extrinsics
-  float H[9];
+  double R[9];
+  double t[3];
 
   //valid flag
   uint32_t valid;
 
   CameraCalibration()
   {
-    BOOST_FOREACH( float &i, focal_point ) {i = 0.0;}
-    BOOST_FOREACH( float &i, principal_point ) {i = 0.0;}
-    BOOST_FOREACH( float &i, distortion ) {i = 0.0;}
-    BOOST_FOREACH( float &i, H ) {i = 0.0;}
+    BOOST_FOREACH( double &i, focal_point ) {i = 0.0;}
+    BOOST_FOREACH( double &i, principal_point ) {i = 0.0;}
+    BOOST_FOREACH( double &i, distortion ) {i = 0.0;}
+    BOOST_FOREACH( double &i, R ) {i = 0.0;}
+    BOOST_FOREACH( double &i, t ) {i = 0.0;}
     valid = 0;
   }
 
@@ -338,16 +308,19 @@ struct CameraCalibration {
 
     int i=0;
     for(int j=0; j<2; j++)
-      memcpy(&cam_calib_payload[i++], &focal_point[j], sizeof(float));
+      memcpy(&cam_calib_payload[i++], &focal_point[j], sizeof(double));
 
     for(int j=0; j<2; j++)
-      memcpy(&cam_calib_payload[i++], &principal_point[j], sizeof(float));
+      memcpy(&cam_calib_payload[i++], &principal_point[j], sizeof(double));
 
     for(int j=0; j<5; j++)
-      memcpy(&cam_calib_payload[i++], &distortion[j], sizeof(float));
+      memcpy(&cam_calib_payload[i++], &distortion[j], sizeof(double));
 
     for(int j=0; j<9; j++)
-      memcpy(&cam_calib_payload[i++], &H[j], sizeof(float));
+      memcpy(&cam_calib_payload[i++], &R[j], sizeof(double));
+
+    for(int j=0; j<3; j++)
+      memcpy(&cam_calib_payload[i++], &t[j], sizeof(double));
 
     cam_calib_payload[i++] = valid;
 
@@ -358,16 +331,19 @@ struct CameraCalibration {
 
     int i=0;
     for(int j=0; j<2; j++)
-      memcpy(&focal_point[j], &cam_calib_payload[i++], sizeof(float));
+      memcpy(&focal_point[j], &cam_calib_payload[i++], sizeof(double));
 
     for(int j=0; j<2; j++)
-      memcpy(&principal_point[j], &cam_calib_payload[i++], sizeof(float));
+      memcpy(&principal_point[j], &cam_calib_payload[i++], sizeof(double));
 
     for(int j=0; j<5; j++)
-      memcpy(&distortion[j], &cam_calib_payload[i++], sizeof(float));
+      memcpy(&distortion[j], &cam_calib_payload[i++], sizeof(double));
 
     for(int j=0; j<9; j++)
-      memcpy(&H[j], &cam_calib_payload[i++], sizeof(float));
+      memcpy(&R[j], &cam_calib_payload[i++], sizeof(double));
+
+    for(int j=0; j<3; j++)
+      memcpy(&t[j], &cam_calib_payload[i++], sizeof(double));
 
     valid = cam_calib_payload[i++];
   }
