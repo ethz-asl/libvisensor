@@ -44,16 +44,12 @@ INCLUDE_DIRECTORIES("include")
 include_directories(${EIGEN_INCLUDE_DIR})
 
 #Release / debug build
+
+ADD_DEFINITIONS (-DVISENSOR_EXPORT -fPIC -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden)
 if(NOT DEFINED CMAKE_BUILD_TYPE)
-set(CMAKE_BUILD_TYPE Release)
-ADD_DEFINITIONS (-DVISENSOR_EXPORT -march=native -fPIC -O2 -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden) #Release
-
-#set(CMAKE_BUILD_TYPE Debug)
-#ADD_DEFINITIONS (-DVISENSOR_EXPORT -march=native -fPIC -O0 -g3 -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden) #Debug
-else(NOT DEFINED CMAKE_BUILD_TYPE)
-ADD_DEFINITIONS (-DVISENSOR_EXPORT -march=native -fPIC -fmessage-length=0 -MMD -MP -Wall -pedantic -std=c++0x -fvisibility=hidden) #Release
+    set(CMAKE_BUILD_TYPE Release)
+    ADD_DEFINITIONS (-march=native -O3)
 endif(NOT DEFINED CMAKE_BUILD_TYPE)
-
 
 #shared library
 ADD_LIBRARY(${PKGNAME} SHARED ${SRCS})
