@@ -1,8 +1,32 @@
 /*
- * sensor_factory.cpp
+ * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
+ * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
  *
- *  Created on: Dec 4, 2013
- *      Author: Pascal Gohl
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
  */
 
 #include <vector>
@@ -14,6 +38,7 @@
 #include "sensors/camera_mt9v034.hpp"
 #include "sensors/camera_tau640.hpp"
 #include "sensors/imu_adis16448.hpp"
+#include "sensors/imu_adis16488.hpp"
 #include "sensors/imu_mpu9150.hpp"
 #include "sensors/corner_mt9v034.hpp"
 #include "sensors/dense_matcher.hpp"
@@ -88,6 +113,21 @@ const void SensorFactory::createSensors(
             std::pair<SensorId::SensorId, Sensor::Ptr>(sensor_id, new_imu));
         break;
       }
+
+      case SensorType::SensorType::IMU_ADIS16488: {
+		  ImuAdis16488::Ptr new_imu = boost::make_shared<ImuAdis16488>(
+			  sensor_id, config_connection_weak);
+		  VISENSOR_DEBUG("ADIS16488 created with sensor_id: %d\n", sensor_id);
+
+		  boost::thread *t1 = new boost::thread(
+			  &ImuAdis16488::processMeasurements, new_imu);
+		  threads->add_thread(t1);
+
+		  sensor_map->insert(
+			  std::pair<SensorId::SensorId, Sensor::Ptr>(sensor_id, new_imu));
+		  break;
+		}
+
       case SensorType::SensorType::CORNER_MT9V034: {
         CornerMt9v034::Ptr new_CornerDetector =
             boost::make_shared<CornerMt9v034>(sensor_id,

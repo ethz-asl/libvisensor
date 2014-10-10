@@ -1,3 +1,34 @@
+/*
+ * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
+ * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ *
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+
 #include <boost/smart_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/asio.hpp>
@@ -79,6 +110,21 @@ void ViSensorDriver::Impl::init(std::string hostname) {
   catch (visensor::exceptions const &ex) {
 //     std::cout << ex.what() << "\n";
   }
+
+  //flip images if necessary
+  for (Sensor::IdMap::const_iterator it = sensors_.begin();
+      it != sensors_.end(); ++it) {
+    if (it->second->type() == SensorType::CAMERA_MT9V034){
+      ViCameraCalibration calib;
+      bool is_camera_flipped;
+      getCameraCalibration(it->first, calib, &is_camera_flipped);
+      if (it->first !=visensor::SensorId::CAM0)//Taking care of legacy stuff...
+        is_camera_flipped = !is_camera_flipped;
+
+      setSensorConfigParam(it->first, "row_flip", is_camera_flipped);
+      setSensorConfigParam(it->first, "column_flip", is_camera_flipped);
+    }
+  }
 }
 
 ViSensorDriver::Impl::~Impl()
@@ -139,6 +185,7 @@ void ViSensorDriver::Impl::setImuCallback(
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
       it != sensors_.end(); ++it) {
     if (it->second->type() == SensorType::IMU_ADIS16448
+    	|| it->second->type() == SensorType::IMU_ADIS16488
         || it->second->type() == SensorType::MPU_9150)
       it->second->setUserCallback(callback);
   }
@@ -184,6 +231,7 @@ void ViSensorDriver::Impl::startAllImus(uint32_t rate) {
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
       if (it->second->type() == SensorType::IMU_ADIS16448
+          || it->second->type() == SensorType::IMU_ADIS16488           
           || it->second->type() == SensorType::MPU_9150)
           startSensor(it->first, rate);
   }
@@ -237,6 +285,7 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfImuIDs() const {
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
         it != sensors_.end(); ++it) {
       if (it->second->type() == SensorType::IMU_ADIS16448
+          || it->second->type() == SensorType::IMU_ADIS16488
           || it->second->type() == SensorType::MPU_9150)
     list_of_imus.push_back(it->first);
   }
@@ -489,28 +538,56 @@ void ViSensorDriver::Impl::startAllCorners() {
 }
 
 
-bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib){
-  return getCameraCalibration(cam_id, current_camera_calibration_slot_, calib);
+bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib, bool* is_camera_flipped){
+
+  return getCameraCalibration(cam_id, current_camera_calibration_slot_, calib, is_camera_flipped);
 }
 
-bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib){
+bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib, bool* is_camera_flipped){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
-  return ip_connection_->readCameraCalibration(cam_id, slot_id, calib);
+  if (ip_connection_->readCameraCalibration(cam_id, 2*slot_id, calib)){
+    if (is_camera_flipped != NULL)
+      *is_camera_flipped = false;
+    return true;
+  }
+  else if(ip_connection_->readCameraCalibration(cam_id, 2*slot_id + 1, calib)){
+    if (is_camera_flipped != NULL)
+      *is_camera_flipped = true;
+    return true;
+  }
+  //We dont know whether camera is flipped or not. Lets set it to false (default)
+  if (is_camera_flipped != NULL)
+    *is_camera_flipped = false;
+  return false;
 }
 
-bool ViSensorDriver::Impl::setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib){
+//Internally, we divide up the slots for flipped cameras (uneven slot_ids) and unflipped cameras (even slot_ids)
+bool ViSensorDriver::Impl::setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib, bool flip_camera){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
   //slot 0 holds the factory calibration and can't be overwritten using the public API
   if(slot_id == 0)
     return false;
-
-  return ip_connection_->writeCameraCalibration(cam_id, slot_id, calib);
+  return ip_connection_->writeCameraCalibration(cam_id, 2*slot_id + static_cast<unsigned int>(flip_camera), calib);
 }
 
+//Check if stereo camera is flipped
+//We assume that cam0 & cam1 are in stereo configuration
+bool ViSensorDriver::Impl::isStereoCameraFlipped()
+{
+  bool is_cam0_flipped = false;
+  bool is_cam1_flipped = false;
+
+  ViCameraCalibration calib;
+  getCameraCalibration(visensor::SensorId::CAM0, calib, &is_cam0_flipped);
+  getCameraCalibration(visensor::SensorId::CAM1, calib, &is_cam1_flipped);
+  return (is_cam0_flipped &&  is_cam1_flipped);
+
+}
 //set factory calibration on slot 0 (private API call)
-bool ViSensorDriver::Impl::setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib){
+//
+bool ViSensorDriver::Impl::setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, bool flip_camera){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
-  return ip_connection_->writeCameraCalibration(cam_id, 0, calib);
+  return ip_connection_->writeCameraCalibration(cam_id, static_cast<unsigned int>(flip_camera), calib);
 }
 
 }  //namespace visensor

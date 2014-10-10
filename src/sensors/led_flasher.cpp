@@ -16,7 +16,7 @@ namespace visensor {
 LedFlasher::LedFlasher(SensorId::SensorId sensor_id,
                            ConfigConnection::WeakPtr config_connection)
     : Sensor(SensorSettings(sensor_id,
-                         SensorType::SensorType::DENSE_MATCHER,
+                         SensorType::SensorType::LIGHT_CONTROL,
                          0,
                          LedFlasherDefaults::NUM_OF_MSGS_IN_PACKAGE,
                          LedFlasherDefaults::USE_CONST_PACKAGE_SIZE,

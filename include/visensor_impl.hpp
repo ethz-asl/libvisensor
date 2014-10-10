@@ -1,3 +1,34 @@
+/*
+ * Copyright (c) 2014, Skybotix AG, Switzerland (info@skybotix.com)
+ * Copyright (c) 2014, Autonomous Systems Lab, ETH Zurich, Switzerland
+ *
+ * All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ */
+
 #ifndef VISENSOR_IMPL_HPP_
 #define VISENSOR_IMPL_HPP_
 
@@ -20,6 +51,7 @@
 #include "sensors/camera_mt9v034.hpp"
 #include "sensors/camera_tau640.hpp"
 #include "sensors/imu_adis16448.hpp"
+#include "sensors/imu_adis16488.hpp"
 #include "sensors/corner_mt9v034.hpp"
 
 
@@ -56,11 +88,11 @@ class ViSensorDriver::Impl {
   void startAllDenseMatchers();
   void setDenseMatcherCallback(boost::function<void(ViFrame::Ptr, ViErrorCode)> callback);
 
-  bool getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib);
-  bool getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib);
-  bool setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib);
-  bool setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib);
-
+  bool getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib, bool* is_camera_flipped = NULL);
+  bool getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib, bool* is_camera_flipped = NULL);
+  bool setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib, bool flip_camera = false);
+  bool setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, bool flip_camera = false);
+  bool isStereoCameraFlipped();
   // is called with synchronized images and corresponding corners
   void setFramesCornersCallback(
       boost::function<
