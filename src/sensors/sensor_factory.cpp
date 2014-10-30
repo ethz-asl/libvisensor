@@ -88,7 +88,7 @@ const void SensorFactory::createSensors(
       case SensorType::SensorType::CAMERA_TAU640: {
         CameraTau640::Ptr new_camera = boost::make_shared<CameraTau640>(
             sensor_id, config_connection_weak);
-        VISENSOR_DEBUG("Tau320 created with sensor_id: %d\n", sensor_id);
+        VISENSOR_DEBUG("Tau640 created with sensor_id: %d\n", sensor_id);
 
         boost::thread *t1 = new boost::thread(
             &CameraTau640::processMeasurements, new_camera);
