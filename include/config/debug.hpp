@@ -48,7 +48,7 @@
 struct Sink { template<typename ...Args> Sink(Args const& ... ) {} };
 #if DEBUG_TEST
   #define VISENSOR_DEBUG(...) \
-      do { printf("[libvisensor]: "); printf(__VA_ARGS__); } while (0)
+      do { fprintf(stderr,"[libvisensor]: "); fprintf(stderr,__VA_ARGS__); } while (0)
 #else
   #define VISENSOR_DEBUG(...) Sink { __VA_ARGS__ }
 #endif

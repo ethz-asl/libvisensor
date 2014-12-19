@@ -108,7 +108,7 @@ void ViSensorDriver::Impl::init(std::string hostname) {
     setCameraCalibrationSlot(0);
   }
   catch (visensor::exceptions const &ex) {
-//     std::cout << ex.what() << "\n";
+     std::cerr << ex.what() << "\n";
   }
 
   //flip images if necessary
