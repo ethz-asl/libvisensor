@@ -69,28 +69,28 @@ namespace visensor {
 
   namespace SensorId {
     enum SensorId {
-      CAM0 = 0,
-      CAM1 = 1,
-      CAM2 = 2,
-      CAM3 = 3,
-      IMU0 = 4,
-      IMU_CAM0 = 5,
-      IMU_CAM1 = 6,
-      IMU_CAM2 = 7,
-      IMU_CAM3 = 8,
-      CORNER_CAM0 = 9,
-      CORNER_CAM1 = 10,
-      CORNER_CAM2 = 11,
-      CORNER_CAM3 = 12,
-      DENSE_MATCHER0 = 13,
-      EXTERNAL_TRIGGER0 = 14,
-      SENSOR_STATUS = 15,
-      SENSOR_CLOCK = 16,
-      FLIR0 = 17,
-      FLIR1 = 18,
-      FLIR2 = 19,
-      FLIR3 = 20,
-      LED_FLASHER0 = 21,
+      CAM0 = 0, // MT9V034 cam0
+      CAM1 = 1, // MT9V034 cam1
+      CAM2 = 2, // MT9V034 cam2
+      CAM3 = 3, // MT9V034 cam3
+      IMU0 = 4, // ADIS 164XX IMU
+      IMU_CAM0 = 5, // Ivensense MPU 9050 on cam0 PCB
+      IMU_CAM1 = 6, // Ivensense MPU 9050 on cam1 PCB
+      IMU_CAM2 = 7, // Ivensense MPU 9050 on cam2 PCB
+      IMU_CAM3 = 8, // Ivensense MPU 9050 on cam3 PCB
+      CORNER_CAM0 = 9, // Experimental FPGA Harris Corners for cam0
+      CORNER_CAM1 = 10, // Experimental FPGA Harris Corners for cam0
+      CORNER_CAM2 = 11, // Experimental FPGA Harris Corners for cam0
+      CORNER_CAM3 = 12, // Experimental FPGA Harris Corners for cam0
+      DENSE_MATCHER0 = 13, // Experimental FPGA SGM dense matcher 
+      EXTERNAL_TRIGGER0 = 14, // Trigger/Interrupt line
+      SENSOR_STATUS = 15, // Experimental
+      SENSOR_CLOCK = 16, // Experimental
+      FLIR0 = 17, // Experimental FLIR Tau 640 
+      FLIR1 = 18, // Experimental FLIR Tau 640
+      FLIR2 = 19, // Experimental FLIR Tau 640
+      FLIR3 = 20, // Experimental FLIR Tau 640
+      LED_FLASHER0 = 21, //PWM interface to LED Flasher
       NOT_SPECIFIED
     };
 
