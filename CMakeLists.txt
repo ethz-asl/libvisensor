@@ -31,8 +31,8 @@ SET(LIBRARY_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 # BUILD
 ###########
 FILE(
-  GLOB SRCS 
-  src/*.cpp 
+  GLOB SRCS
+  src/*.cpp
   src/sensors/*.cpp
   src/networking/*.cpp
   src/synchronization/*.cpp
@@ -54,27 +54,26 @@ endif(NOT DEFINED CMAKE_BUILD_TYPE)
 #shared library
 ADD_LIBRARY(${PKGNAME} SHARED ${SRCS})
 SET_TARGET_PROPERTIES(${PKGNAME} PROPERTIES OUTPUT_NAME ${PKGNAME})
-TARGET_LINK_LIBRARIES(${PKGNAME} boost_thread boost_system) 
-
+TARGET_LINK_LIBRARIES(${PKGNAME} boost_system boost_thread-mt)
 #static library
 ADD_LIBRARY(${PKGNAME}_static STATIC ${SRCS})
 SET_TARGET_PROPERTIES(${PKGNAME}_static PROPERTIES OUTPUT_NAME ${PKGNAME})
-TARGET_LINK_LIBRARIES(${PKGNAME}_static boost_thread boost_system) 
+TARGET_LINK_LIBRARIES(${PKGNAME}_static boost_system boost_thread-mt)
 
 ###########
 # INSTALL
 ###########
 #shared library
 INSTALL(
-  FILES lib/lib${PKGNAME}.so 
-  DESTINATION lib 
+  FILES lib/lib${PKGNAME}.so
+  DESTINATION lib
   COMPONENT shared-lib
 )
 
 #static library + headers (-dev package)
 INSTALL(
-  FILES lib/lib${PKGNAME}.a 
-  DESTINATION lib 
+  FILES lib/lib${PKGNAME}.a
+  DESTINATION lib
   COMPONENT static-lib
 )
 
@@ -91,14 +90,14 @@ INSTALL(
 )
 
 INSTALL(
-  FILES cmake/FindVISensor.cmake 
+  FILES cmake/FindVISensor.cmake
   DESTINATION lib/visensor
   COMPONENT static-lib
 )
 
 INSTALL(
-  FILES pkgconfig/visensor.pc 
-  DESTINATION share/pkgconfig 
-  COMPONENT 
+  FILES pkgconfig/visensor.pc
+  DESTINATION share/pkgconfig
+  COMPONENT
   static-lib
 )

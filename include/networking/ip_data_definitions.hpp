@@ -40,7 +40,7 @@
 #include <netinet/in.h> //for ntohl() and htonl()
 #include <boost/array.hpp>
 #include <boost/foreach.hpp>
-
+#include <libkern/OSByteOrder.h>
 
 namespace IpComm {
 
@@ -258,14 +258,14 @@ struct TimeSync
 
   TimeSyncPayload getSerialized() {
     TimeSyncPayload time_sync_payload;
-    time_sync_payload[0]=htobe64(host_time); //TODO(gohlp): find OSX compatible equivalent for htobe64
-    time_sync_payload[1]=htobe64(fpga_time);
+    time_sync_payload[0]=OSSwapHostToBigInt64(host_time);
+    time_sync_payload[1]=OSSwapHostToBigInt64(fpga_time);
     return time_sync_payload;
   }
 
   void setSerialized(TimeSyncPayload time_sync_payload) {
-    host_time=be64toh(time_sync_payload[0]);
-    fpga_time=be64toh(time_sync_payload[1]);
+    host_time=OSSwapBigToHostInt64(time_sync_payload[0]);
+    fpga_time=OSSwapBigToHostInt64(time_sync_payload[1]);
   }
 };
 
