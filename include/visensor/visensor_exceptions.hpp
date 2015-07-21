@@ -32,8 +32,9 @@
 #ifndef VISENSOR_EXCEPTIONS_HPP_
 #define VISENSOR_EXCEPTIONS_HPP_
 
-#include <visensor/visensor_config.hpp>
 #include <stdexcept>
+
+#include "visensor/visensor_config.hpp"
 
 namespace visensor {
 
@@ -45,6 +46,7 @@ class DSO_EXPORT exceptions : public std::runtime_error
   class ConnectionException;
   class SensorException;
   class FirmwareException;
+  class ConfigException;
 };
 
 class DSO_EXPORT exceptions::ConnectionException : public exceptions
@@ -63,6 +65,12 @@ class DSO_EXPORT exceptions::FirmwareException : public exceptions
 {
   public:
   FirmwareException(std::string msg): exceptions(msg) {}
+};
+
+class DSO_EXPORT exceptions::ConfigException : public exceptions
+{
+  public:
+  ConfigException(std::string msg): exceptions(msg) {}
 };
 
 

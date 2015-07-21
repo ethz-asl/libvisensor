@@ -169,27 +169,91 @@ void ViSensorDriver::setDenseMatcherCallback(boost::function<void(ViFrame::Ptr, 
   pImpl_->setDenseMatcherCallback(callback);
 }
 
-void ViSensorDriver::setCameraCalibrationSlot(int slot_id){
-  pImpl_->setCameraCalibrationSlot(slot_id);
+void ViSensorDriver::setCameraCalibrationToUse(const SensorId::SensorId cam_id,
+                                               const int slot_id,
+                                               const int is_flipped,
+                                               const ViCameraLensModel::LensModelTypes lens_model_type,
+                                               const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) {
+  pImpl_->setCameraCalibrationToUse(cam_id, slot_id, is_flipped, lens_model_type, projection_model_type);
 }
 
-int ViSensorDriver::getCameraCalibrationSlot(){
-  return pImpl_->getCameraCalibrationSlot();
+void ViSensorDriver::setCameraCalibrationToUse() {
+  pImpl_->setCameraCalibrationToUse();
 }
 
-bool ViSensorDriver::getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib, bool* is_camera_flipped, int slot_id) const
+void ViSensorDriver::getSelectedCameraCalibration(ViCameraCalibration* usedCalibration, const SensorId::SensorId camera_id) const {
+  pImpl_->getSelectedCameraCalibration(usedCalibration, camera_id);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::getCameraCalibrations(SensorId::SensorId cam_id) const {
+  return pImpl_->getCameraCalibrations(cam_id);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::getCameraCalibrations(SensorId::SensorId cam_id,
+                                                                       int slot_id) const {
+  return pImpl_->getCameraCalibrations(cam_id, slot_id);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::getCameraCalibrations(SensorId::SensorId cam_id,
+                                                                       ViCameraLensModel::LensModelTypes lens_model_type,
+                                                                       ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const {
+  return pImpl_->getCameraCalibrations(cam_id, lens_model_type, projection_model_type);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::getCameraCalibrations(SensorId::SensorId cam_id,
+                                                                       int slot_id,
+                                                                       ViCameraLensModel::LensModelTypes lens_model_type,
+                                                                       ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const {
+  return pImpl_->getCameraCalibrations(cam_id, slot_id, lens_model_type, projection_model_type);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::getCameraCalibrations(SensorId::SensorId cam_id,
+                                                                       int slot_id,
+                                                                       int is_flipped,
+                                                                       ViCameraLensModel::LensModelTypes lens_model_type,
+                                                                       ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const {
+  return pImpl_->getCameraCalibrations(cam_id, slot_id, is_flipped, lens_model_type, projection_model_type);
+}
+
+void ViSensorDriver::setCameraCalibration(const ViCameraCalibration& calib) const
 {
-  return pImpl_->getCameraCalibration(cam_id, slot_id, calib, is_camera_flipped);
+  pImpl_->setCameraCalibration(calib);
 }
 
-bool ViSensorDriver::setCameraCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, int slot_id ) const
-{
-  return pImpl_->setCameraCalibration(cam_id, slot_id, calib);
+bool ViSensorDriver::cleanCameraCalibrations(const SensorId::SensorId cam_id,
+                                                   const int slot_id,
+                                                   const int is_flipped,
+                                                   const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                   const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) {
+  if(slot_id == 0){
+    throw visensor::exceptions::ConfigException("The factory calibrations can not be cleaned.");
+  }
+  return pImpl_->cleanCameraCalibrations(cam_id, slot_id, is_flipped, lens_model_type, projection_model_type);
 }
 
-bool ViSensorDriver::setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, bool flip_camera) const
-{
-  return pImpl_->setCameraFactoryCalibration(cam_id, calib, flip_camera);
+bool ViSensorDriver::cleanCameraCalibrations(const SensorId::SensorId cam_id){
+  std::vector<ViCameraCalibration> calibrations = pImpl_->getCameraCalibrations(cam_id);
+  bool deleted_one = false;
+  for (std::vector<ViCameraCalibration>::iterator it = calibrations.begin();  it != calibrations.end(); ++it) {
+    //ignore all factory calibrations. Use the impl class to delete the factory calibration
+    if (it->slot_id_ == 0)
+      continue;
+    deleted_one = true;
+    pImpl_->cleanCameraCalibrations(cam_id, it->slot_id_, it->is_flipped_, it->lens_model_->type_, it->projection_model_->type_);
+  }
+  return deleted_one;
+}
+
+bool ViSensorDriver::cleanCameraCalibrations(){
+  return cleanCameraCalibrations( SensorId::SensorId::NOT_SPECIFIED);
+}
+
+void ViSensorDriver::setViSensorId(const int vi_sensor_id) {
+  pImpl_->setViSensorId(vi_sensor_id);
+}
+
+int ViSensorDriver::getViSensorId() const {
+  return pImpl_->getViSensorId();
 }
 
 bool ViSensorDriver::isStereoCameraFlipped() const
@@ -216,6 +280,11 @@ void ViSensorDriver::setSerialDelimiter(const char serial_id, const std::string 
 void ViSensorDriver::setSerialBaudrate(const char serial_id, const unsigned int baudrate) const
 {
   pImpl_->setSerialBaudrate(serial_id, baudrate);
+}
+
+bool ViSensorDriver::isSensorPresent(const SensorId::SensorId sensor_id) const
+{
+  return pImpl_->isSensorPresent(sensor_id);
 }
 
 }  //namespace visensor

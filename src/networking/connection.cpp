@@ -29,6 +29,11 @@
  *
  */
 
+#ifdef USE_TIMESYNC_LOGGING
+#include <fstream>
+#include <iostream>
+#endif
+
 #include <boost/smart_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/lexical_cast.hpp>
@@ -36,10 +41,10 @@
 #include <boost/thread.hpp>
 #include <boost/asio.hpp>
 
-#include "visensor/visensor_version.hpp"
-#include "visensor/visensor_exceptions.hpp"
 #include "networking/connection.hpp"
 #include "networking/file_transfer.hpp"
+#include "visensor/visensor_version.hpp"
+#include "visensor/visensor_exceptions.hpp"
 
 
 using boost::asio::ip::tcp;
@@ -48,12 +53,19 @@ namespace visensor
 {
 IpConnection::IpConnection()
 : connected_(false),
+  time_synchronizer_(SensorId::SENSOR_CLOCK, static_cast<uint64_t>(SECOND_IN_NANOSECOND/FPGA_TIME_COUNTER_FREQUENCY)),
+  number_of_sensors_(0),
+  first_host_timestamp_(0),
+  led_sensor_id_(SensorId::SensorId::NOT_SPECIFIED),
   data_socket_(io_service_),
   imu_socket_(io_service_),
   serial_socket_(io_service_),
   config_socket_(io_service_),
-  file_transfer_(config_socket_)
-{}
+  time_sync_socket_(io_service_),
+  ssh_connection_(boost::make_shared<SshConnection>())
+{
+  file_transfer_ = boost::make_shared<FileTransfer>(ssh_connection_);
+}
 
 IpConnection::~IpConnection(){
   VISENSOR_DEBUG("connection closed\n");
@@ -76,6 +88,9 @@ void IpConnection::connect(std::string sensor_address) {
   if (!config_socket_.is_open())
     throw visensor::exceptions::ConnectionException("Could not connect to config stream at " + sensor_address);
 
+  //read fpga info and check version before open more sockets
+  readFpgaInfo();
+
   try {
     // open data connection
     tcp::resolver::query query_data(sensor_address, "13777");
@@ -89,24 +104,32 @@ void IpConnection::connect(std::string sensor_address) {
     tcp::resolver::query query_serial(sensor_address, "13780");
     tcp::resolver::iterator endpoint_serial = resolver.resolve(query_serial);
     serial_socket_.connect(*endpoint_serial);
+    tcp::resolver::query query_sync(sensor_address, "13781");
+    tcp::resolver::iterator endpoint_sync = resolver.resolve(query_sync);
+    time_sync_socket_.connect(*endpoint_sync);
+    time_sync_socket_.set_option(tcp::no_delay(true));
   } catch (boost::system::system_error const& e) {
-    VISENSOR_DEBUG("Connection could not be established!\n");
+    VISENSOR_DEBUG("Connection could not be established! %s\n", e.what());
     throw visensor::exceptions::ConnectionException("Could not connect to data sockets at " + sensor_address);
   }
+
+  if (!ssh_connection_->sshConnect(sensor_address, "root", ""))
+    throw visensor::exceptions::ConnectionException("could not connect to sensor at " + sensor_address);
+
 
   //check all data sockets (have to be open, if the config connected successfully)
   VISENSOR_ASSERT_COND(!data_socket_.is_open(), "Can't connect camera data socket.\n");
   VISENSOR_ASSERT_COND(!imu_socket_.is_open(), "Can't connect imu data socket.\n");
   VISENSOR_ASSERT_COND(!serial_socket_.is_open(), "Can't connect serial data socket.\n");
+  VISENSOR_ASSERT_COND(!time_sync_socket_.is_open(), "Can't connect time sync data socket.\n");
+  VISENSOR_ASSERT_COND(!ssh_connection_->isOpen(), "Can't initialize ssh connection.\n");
 
   VISENSOR_DEBUG("Connection established\n");
 
-  //read fpga info
-  readFpgaInfo();
   connected_=true;
 
   //synchronize clocks
-  syncTime();
+  initialSyncTime();
 
   // start receiving data streams
   async_read(data_socket_, boost::asio::buffer(data_header_payload_), boost::asio::transfer_all(),
@@ -123,6 +146,7 @@ void IpConnection::connect(std::string sensor_address) {
                          boost::asio::placeholders::bytes_transferred));
 
   boost::thread bt(boost::bind(&boost::asio::io_service::run, &io_service_));
+  sendHeader(IpComm::HOST_INITIALIZED);
 }
 
 void IpConnection::registerSerialHost(SerialHost::WeakPtr serial_host)
@@ -197,59 +221,45 @@ void IpConnection::addSensor(SensorId::SensorId sensor_id, Sensor::Ptr sensor) {
   sensors_.insert(std::pair<SensorId::SensorId, Sensor::Ptr>(sensor_id, sensor));
 }
 
-void IpConnection::syncTime(){
+void IpConnection::initialSyncTime(){
 
   VISENSOR_DEBUG("syncing time \n");
-  sendHeader(IpComm::SYNC_TIME);
 
   int number_of_measurements = 10;
-  std::vector<uint64_t> time_differences(number_of_measurements);
-  std::vector<uint64_t> fpga_time(number_of_measurements);
   IpComm::TimeSync ping;
   IpComm::TimeSyncPayload pong_payload;
-  uint64_t total_time = 0;
 
   // send one ping pong to wait for free network
   ping.host_time = 1;
   ping.fpga_time = 0;
-  boost::asio::write(config_socket_, boost::asio::buffer(ping.getSerialized()));
-  receive_payload(config_socket_, pong_payload);
-
-  uint64_t minRoundTrip = 1e9;
+  boost::asio::write(time_sync_socket_, boost::asio::buffer(ping.getSerialized()));
+  receive_payload(time_sync_socket_, pong_payload);
 
   // run the measurements
-  for(int i=0;i<number_of_measurements;++i)
+  for(int i = 0; i < number_of_measurements; ++i)
   {
     // send ping to sensor
     ping.host_time = time_synchronizer_.getSystemTime();
-    boost::asio::write(config_socket_, boost::asio::buffer(ping.getSerialized()));
+    uint64_t request_time = time_synchronizer_.getSystemTime();
+    boost::asio::write(time_sync_socket_, boost::asio::buffer(ping.getSerialized()));
 
     // receive pong from sensor
-    receive_payload(config_socket_, pong_payload);
+    receive_payload(time_sync_socket_, pong_payload);
+    uint64_t receipe_time = time_synchronizer_.getSystemTime();
     IpComm::TimeSync pong(pong_payload);
 
-    // save time difference
-    time_differences[i] = time_synchronizer_.getSystemTime() - pong.host_time;
-    fpga_time[i] = pong.fpga_time;
+    uint32_t fpga_time = static_cast<uint32_t>(pong.fpga_time);
 
-    total_time += time_differences[i];
-    //VISENSOR_DEBUG("time_differences: %llu\n", time_differences[i]);
-    VISENSOR_DEBUG(".");
+    // start model with ping pong to estimate transmition time
+    time_synchronizer_.initialUpdate(request_time, fpga_time, receipe_time);
+    LOG_TIMESTAMP("TwoWayUpdate:  " + std::to_string(-1) + ";"
+                  + std::to_string(request_time)  + "; "
+                  + std::to_string(receipe_time)  + "; "
+                  + std::to_string(fpga_time)  + "; "
+                  + std::to_string(getTimestampFpga(fpga_time)) + "; "
+                  + std::to_string(getTimestamp(fpga_time)) + " \n");
 
-    if(time_differences[i] < minRoundTrip)
-    {
-        time_synchronizer_.init((pong.host_time + time_differences[i]/2), (fpga_time[i]*10e3));
-        minRoundTrip = time_differences[i];
-    }
   }
-
-  // send the termination signal
-  ping.host_time = 0;
-  boost::asio::write(config_socket_, boost::asio::buffer(ping.getSerialized()));
-
-
-  double average = (double)total_time/(double)number_of_measurements/1000000.0;
-  VISENSOR_DEBUG(" average: %fms\n", average);
 }
 
 void IpConnection::read_handler(const boost::system::error_code& error,
@@ -261,52 +271,82 @@ void IpConnection::read_handler(const boost::system::error_code& error,
                     bytes_transferred,
                     sizeof(data_header_payload_));
 
-
     IpComm::Header header(data_header_payload_);
+    uint64_t receipe_time = time_synchronizer_.getSystemTime();
 
-    // VISENSOR_DEBUG("header: %d, %d, %d\n", header.timestamp, header.data_size, header.data_id);
+    if (first_host_timestamp_ == 0)
+      first_host_timestamp_ = receipe_time;
 
-    // allocate memory for new data
-    uint8_t timestamp_buffer[4];
-
-    uint8_t* data_ptr = new uint8_t[header.data_size-4];
-
-    // build receive buffers pointing to allocated memory
-    std::vector<boost::asio::mutable_buffer> receive_buffers;
-    receive_buffers.push_back(boost::asio::buffer(timestamp_buffer, 4));
-    receive_buffers.push_back(boost::asio::buffer(data_ptr, header.data_size-4));
-
-    // receive the data
-    boost::system::error_code receive_error;
-    unsigned int nBytesReceived = boost::asio::read(data_socket_, receive_buffers, boost::asio::transfer_all(), receive_error);
-
-    boost::shared_ptr<uint8_t> data( data_ptr, array_deleter<uint8_t>() );
-
-    if(receive_error)
-    {
-      // handle errors which happen when terminating the code
-      if (receive_error != boost::asio::error::operation_aborted
-          || receive_error != boost::asio::error::bad_descriptor)
-      {
-        VISENSOR_DEBUG("Camera server: receive handler aborted due to client shutdown\n");
-        return;
+    // use only one sensor to update time synchronization to avoid wrong order
+    if(header.data_id == time_synchronizer_.get_stream_id()) {
+      if (receipe_time > (first_host_timestamp_ + STARTUP_TIMEOUT)) {
+        time_synchronizer_.updateTime(header.timestamp, receipe_time);
+        LOG_TIMESTAMP("OneWayUpdate: " + std::to_string(header.data_id) + "; 0; "
+                      + std::to_string(receipe_time)  + "; "
+                      + std::to_string(header.timestamp)  + "; "
+                      + std::to_string(getTimestampFpga(header.timestamp)) + "; "
+                      + std::to_string(getTimestamp(header.timestamp)) + " \n");
       }
     }
+    else if(header.data_size == 0){
+       VISENSOR_DEBUG("Zero size data received but thinks its a sensor.\n");
+    }
+    else {
+      // allocate memory for new data
+      uint8_t timestamp_buffer[4];
 
-    VISENSOR_ASSERT_COND(nBytesReceived != header.data_size,
-                    "not correct number of bytes received: %u != %u\n",
-                    nBytesReceived,
-                    header.data_size);
+      uint8_t* data_ptr = new uint8_t[header.data_size-4];
 
-    Measurement::Ptr measurement = boost::make_shared<Measurement>();
-    measurement->timestamp = getTimestamp(timestamp_buffer);
-    measurement->timestamp_fpga_counter = getTimestampFpgaRaw(timestamp_buffer)  ; //raw fpga counter timestamp
-    measurement->data = data;
+      // build receive buffers pointing to allocated memory
+      std::vector<boost::asio::mutable_buffer> receive_buffers;
+      receive_buffers.push_back(boost::asio::buffer(timestamp_buffer, 4));
+      receive_buffers.push_back(boost::asio::buffer(data_ptr, header.data_size-4));
 
-    measurement->buffer_size = header.data_size-4;
+      // receive the data
+      boost::system::error_code receive_error;
+      unsigned int nBytesReceived = boost::asio::read(data_socket_, receive_buffers, boost::asio::transfer_all(), receive_error);
 
-    processPackage(static_cast<SensorId::SensorId>(header.data_id), measurement);
+      boost::shared_ptr<uint8_t> data( data_ptr, array_deleter<uint8_t>() );
 
+      if(receive_error)
+      {
+        // handle errors which happen when terminating the code
+        if (receive_error != boost::asio::error::operation_aborted
+            || receive_error != boost::asio::error::bad_descriptor)
+        {
+          VISENSOR_DEBUG("Camera server: receive handler aborted due to client shutdown\n");
+          return;
+        }
+      }
+
+      VISENSOR_ASSERT_COND(nBytesReceived != header.data_size,
+                      "not correct number of bytes received: %u != %u\n",
+                      nBytesReceived,
+                      header.data_size);
+
+
+      // ignore first packages because there are inaccurate
+      if (receipe_time > (first_host_timestamp_ + STARTUP_TIMEOUT)) {
+        Measurement::Ptr measurement = boost::make_shared<Measurement>();
+        measurement->timestamp  = getTimestampFpga(timestamp_buffer);
+        measurement->timestamp_synchronized = getTimestamp(timestamp_buffer);
+        measurement->timestamp_fpga_counter = getTimestampFpgaRaw(timestamp_buffer)  ; //raw fpga counter timestamp
+        measurement->timestamp_host = receipe_time;
+        measurement->data = data;
+        measurement->buffer_size = header.data_size-4;
+
+        LOG_TIMESTAMP("GetSyncTime Cam: " + std::to_string(header.data_id) + "; 0; "
+                      + std::to_string(measurement->timestamp_host) + "; "
+                      + std::to_string(measurement->timestamp_fpga_counter) + "; "
+                      + std::to_string(measurement->timestamp)  + "; "
+                      + std::to_string(measurement->timestamp_synchronized) + " \n");
+
+        processPackage(static_cast<SensorId::SensorId>(header.data_id), measurement);
+      }
+      else {
+        VISENSOR_DEBUG("ignore first packages because of inaccurately\n");
+      }
+    }
     // ready to receive a new data header
     async_read(data_socket_, boost::asio::buffer(data_header_payload_), boost::asio::transfer_all(),
                                 boost::bind(&IpConnection::read_handler, this, boost::asio::placeholders::error,
@@ -332,46 +372,75 @@ void IpConnection::imu_read_handler(const boost::system::error_code& error,
                     sizeof(imu_header_payload_));
 
     IpComm::Header header(imu_header_payload_);
+    uint64_t receipe_time = time_synchronizer_.getSystemTime();
 
-//    VISENSOR_DEBUG("header: %d, %d, %d\n", header.timestamp, header.data_size, header.data_id);
-
-    // read payload
-    uint8_t timestamp_buffer[4];
-    uint8_t* data_ptr = new uint8_t[header.data_size-4];
-
-    std::vector<boost::asio::mutable_buffer> receive_buffers;
-    receive_buffers.push_back(boost::asio::buffer(timestamp_buffer, 4));
-    receive_buffers.push_back(boost::asio::buffer(data_ptr, header.data_size-4));
-    boost::system::error_code receive_error;
-    unsigned int nBytesReceived = boost::asio::read(imu_socket_, receive_buffers, boost::asio::transfer_all(), receive_error);
-
-    boost::shared_ptr<uint8_t> data( data_ptr, array_deleter<uint8_t>() );
-
-    if(receive_error)
-    {
-      // handle errors which happen when terminating the code
-      if (receive_error != boost::asio::error::operation_aborted
-          || receive_error != boost::asio::error::bad_descriptor)
-      {
-        VISENSOR_DEBUG("Imu server: receive handler aborted due to client shutdown\n");
-        return;
+    // use only one sensor to update time synchronization to avoid wrong order
+    if(header.data_id == time_synchronizer_.get_stream_id()) {
+      if (receipe_time > (first_host_timestamp_ + STARTUP_TIMEOUT)) {
+        time_synchronizer_.updateTime(header.timestamp, receipe_time);
+        LOG_TIMESTAMP("OneWayUpdate: " + std::to_string(header.data_id) + "; 0; "
+                      + std::to_string(receipe_time)  + "; "
+                      + std::to_string(header.timestamp)  + "; "
+                      + std::to_string(getTimestampFpga(header.timestamp)) + "; "
+                      + std::to_string(getTimestamp(header.timestamp)) + " \n");
       }
     }
+    else if(header.data_size == 0){
+       VISENSOR_DEBUG("Zero size data received but thinks its a sensor.\n");
+    }
+    else {
+      // read payload
+      uint8_t timestamp_buffer[4];
+      uint8_t* data_ptr = new uint8_t[header.data_size-4];
 
-    VISENSOR_ASSERT_COND(nBytesReceived != header.data_size,
-                    "not correct number of bytes received: %u != %u\n",
-                    nBytesReceived,
-                    header.data_size);
+      std::vector<boost::asio::mutable_buffer> receive_buffers;
+      receive_buffers.push_back(boost::asio::buffer(timestamp_buffer, 4));
+      receive_buffers.push_back(boost::asio::buffer(data_ptr, header.data_size-4));
+      boost::system::error_code receive_error;
+      unsigned int nBytesReceived = boost::asio::read(imu_socket_, receive_buffers, boost::asio::transfer_all(), receive_error);
 
-    // fill data into measurement
-    Measurement::Ptr measurement( new Measurement() );
-    measurement->timestamp = getTimestamp(timestamp_buffer);
-    measurement->timestamp_fpga_counter = getTimestampFpgaRaw(timestamp_buffer)  ; //raw fpga counter timestamp
-    measurement->data = data;
-    measurement->buffer_size = header.data_size-4;
+      boost::shared_ptr<uint8_t> data( data_ptr, array_deleter<uint8_t>() );
 
-    processPackage(static_cast<SensorId::SensorId>(header.data_id), measurement);
+      if(receive_error)
+      {
+        // handle errors which happen when terminating the code
+        if (receive_error != boost::asio::error::operation_aborted
+            || receive_error != boost::asio::error::bad_descriptor)
+        {
+          VISENSOR_DEBUG("Imu server: receive handler aborted due to client shutdown\n");
+          return;
+        }
+      }
 
+      VISENSOR_ASSERT_COND(nBytesReceived != header.data_size,
+                      "not correct number of bytes received: %u != %u\n",
+                      nBytesReceived,
+                      header.data_size);
+
+      if (first_host_timestamp_ == 0)
+        first_host_timestamp_ = receipe_time;
+
+      // ignore first packages because there are inaccurate
+      if (receipe_time > (first_host_timestamp_ + STARTUP_TIMEOUT)) {
+        // fill data into measurement
+        Measurement::Ptr measurement( new Measurement() );
+        measurement->timestamp  = getTimestampFpga(timestamp_buffer);
+        measurement->timestamp_synchronized = getTimestamp(timestamp_buffer);
+        measurement->timestamp_fpga_counter = getTimestampFpgaRaw(timestamp_buffer)  ; //raw fpga counter timestamp
+        measurement->timestamp_host = receipe_time;
+        measurement->data = data;
+        measurement->buffer_size = header.data_size-4;
+        LOG_TIMESTAMP("GetSyncTime IMU: " + std::to_string(header.data_id) + "; 0; "
+                      + std::to_string(measurement->timestamp_host) + "; "
+                      + std::to_string(measurement->timestamp_fpga_counter) + "; "
+                      + std::to_string(measurement->timestamp)  + "; "
+                      + std::to_string(measurement->timestamp_synchronized) + " \n");
+        processPackage(static_cast<SensorId::SensorId>(header.data_id), measurement);
+      }
+      else {
+        VISENSOR_DEBUG("ignore first packages because of inaccurately\n");
+      }
+    }
     async_read(imu_socket_, boost::asio::buffer(imu_header_payload_), boost::asio::transfer_all(),
                                 boost::bind(&IpConnection::imu_read_handler, this, boost::asio::placeholders::error,
                                             boost::asio::placeholders::bytes_transferred));
@@ -427,7 +496,6 @@ void IpConnection::serial_read_handler(const boost::system::error_code& error,
        if(!serial_host_._empty())
          getSerialHostPointer()->addDataToPublishQueue(msg_ptr);
 
-       //VISENSOR_DEBUG("serial port %u: %s", msg_ptr->port_id, msg_ptr->data.c_str());
        break;
      }
      default:
@@ -533,20 +601,29 @@ bool IpConnection::receiveAck(boost::asio::ip::tcp::socket &socket)
     return false;
 }
 
-void IpConnection::downloadFile(std::string& local_path, std::string& remote_path) {
-  // send the file request
-  sendHeader(IpComm::REQUEST_FILE);
 
-  // receive file and write to path
-  file_transfer_.receiveFile(local_path, remote_path);
-}
+//RW: true ==> read-write, RW: false ==> read-only
+void IpConnection::setSensorMountRW(const bool read_write) const
+{
 
-void IpConnection::uploadFile(std::string& local_path, std::string& remote_path) {
-  // prepare sensor to receive calibration file
-  sendHeader(IpComm::SEND_FILE);
+  std::string output;
+  int exitcode=127;
 
-  // read file from path and send it to the sensor
-  file_transfer_.sendFile(local_path, remote_path);
+  /*command */
+  std::string cmd;
+  if(read_write)
+    cmd = "mount -o remount,rw /";
+  else
+    cmd = "mount -o remount,ro /";
+
+  /* run command */
+  ssh_connection_->runCommand( cmd,
+                     &output,
+                     exitcode );
+
+  //0 and 255 are success exit codes
+  if( exitcode != 0 && exitcode != 255)
+    throw visensor::exceptions::ConnectionException("Could not change RW mode on sensor!\n");
 }
 
 IpComm::Header IpConnection::readHeader(boost::asio::ip::tcp::socket &socket) {
@@ -571,7 +648,7 @@ void IpConnection::readFpgaInfo()
   receive_payload(config_socket_, fpga_info_payload);
   IpComm::FpgaInfo config(fpga_info_payload);
 
-  if(config.firmwareVersionMajor != LIBRARY_VERSION_MAJOR || config.firmwareVersionMinor != LIBRARY_VERSION_MINOR )
+  if(config.firmwareVersionMajor != SUPPORTED_FIRMWARE_VERSION_MAJOR || config.firmwareVersionMinor != SUPPORTED_FIRMWARE_VERSION_MINOR )
   {
     std::string error_msg =
         std::string("Sensor firmware version not compatible. Got ")
@@ -581,9 +658,9 @@ void IpConnection::readFpgaInfo()
       + std::string(".")
       + boost::lexical_cast<std::string>(config.firmwareVersionPatch)
       + std::string(" but expected ")
-      + boost::lexical_cast<std::string>(LIBRARY_VERSION_MAJOR)
+      + boost::lexical_cast<std::string>(SUPPORTED_FIRMWARE_VERSION_MAJOR)
       + std::string(".")
-      + boost::lexical_cast<std::string>(LIBRARY_VERSION_MINOR)
+      + boost::lexical_cast<std::string>(SUPPORTED_FIRMWARE_VERSION_MINOR)
       + std::string(".X. Please use the visensor-update tool to update the firmware.\n");
 
     throw visensor::exceptions::FirmwareException(error_msg);
@@ -612,7 +689,7 @@ std::vector<IpComm::SensorInfo> IpConnection::getAttachedSensors()
   IpComm::Header header = readHeader(config_socket_);
   if(header.data_id != IpComm::SENSOR_INFO && header.data_size != number_of_sensors_)
   {
-    VISENSOR_DEBUG("read init msg failed");
+    VISENSOR_DEBUG("read init msg failed\n");
     return sensor_list;
   }
 
@@ -626,77 +703,17 @@ std::vector<IpComm::SensorInfo> IpConnection::getAttachedSensors()
     receive_payload(config_socket_, sensor_info_payload);
 
     IpComm::SensorInfo sensorInfo(sensor_info_payload);
-    sensor_list.push_back(sensorInfo);
+    switch (sensorInfo.sensor_type) {
+      case SensorType::SensorType::TIMING_BLOCK: {
+        time_synchronizer_.set_stream_id(sensorInfo.sensor_id);
+        break; // don't add to sensor list
+      }
+      default:
+        sensor_list.push_back(sensorInfo);
+    }
   }
 
   return sensor_list;
-}
-
-bool IpConnection::readCameraCalibration(SensorId::SensorId cam_id, unsigned int slot_id, ViCameraCalibration &calib_out)
-{
-  //request calibration with given id
-  IpComm::Header header;
-  header.data_id = IpComm::READ_CAMERA_CALIBRATION;
-  header.data_size = 0;
-  header.timestamp = 0;
-
-  IpComm::CalibrationId package;
-  package.port_id = cam_id;
-  package.slot_id = slot_id;
-
-  send_package(header, package);
-
-  //PROCESS RESPONSE
-  IpComm::Header header2;
-  header2 = readHeader(config_socket_);
-
-  if(header2.data_id != IpComm::READ_CAMERA_CALIBRATION)
-    throw visensor::exceptions::FirmwareException("READ_CAMERA_CALIBRATION request failed. Check firmware version.");
-
-  IpComm::CameraCalibrationPayload calib_payload;
-  receive_payload(config_socket_, calib_payload);
-
-  //deserialize
-  IpComm::CameraCalibration calib(calib_payload);
-
-  if(!calib.valid)
-    return false;
-
-  for(int i=0; i<2; i++) calib_out.focal_point[i] = calib.focal_point[i];
-  for(int i=0; i<2; i++) calib_out.principal_point[i] = calib.principal_point[i];
-  for(int i=0; i<5; i++) calib_out.dist_coeff[i] = calib.distortion[i];
-  for(int i=0; i<9; i++) calib_out.R[i] = calib.R[i];
-  for(int i=0; i<3; i++) calib_out.t[i] = calib.t[i];
-
-  return true;
-}
-
-bool IpConnection::writeCameraCalibration(SensorId::SensorId cam_id, unsigned int slot_id, const ViCameraCalibration calib)
-{
-  //send calibration write request
-  IpComm::Header header;
-  header.data_id = IpComm::WRITE_CAMERA_CALIBRATION;
-  header.data_size = 0;
-  header.timestamp = 0;
-
-  IpComm::CalibrationId package_id;
-  package_id.port_id = cam_id;
-  package_id.slot_id = slot_id;
-
-  IpComm::CameraCalibration package_calib;
-  for(int i=0; i<2; i++) package_calib.focal_point[i] = calib.focal_point[i];
-  for(int i=0; i<2; i++) package_calib.principal_point[i] = calib.principal_point[i];
-  for(int i=0; i<5; i++) package_calib.distortion[i] = calib.dist_coeff[i];
-  for(int i=0; i<9; i++) package_calib.R[i] = calib.R[i];
-  for(int i=0; i<3; i++) package_calib.t[i] = calib.t[i];
-
-  boost::asio::write(config_socket_, boost::asio::buffer(header.getSerialized()));
-  boost::asio::write(config_socket_, boost::asio::buffer(package_id.getSerialized()));
-  boost::asio::write(config_socket_, boost::asio::buffer(package_calib.getSerialized()));
-
-  //check if write was calibration was stored successfully (ACK/NACK)
-  bool ret = receiveAck(config_socket_);
-  return ret;
 }
 
 bool IpConnection::sendLedConfig(uint16_t value)
@@ -757,7 +774,6 @@ bool IpConnection::writeDataUbi(SensorId::SensorId sens_addr, unsigned char reg,
                                  T val, int numBits) {
   IpComm::Header header;
   header.data_id = IpComm::WRITE_UBI_REGISTER;
-  //VISENSOR_DEBUG("send header id: %d register: %d, val: %d\n", header.data_id, reg, val);
   IpComm::BusPackage package;
   package.sensor_id = sens_addr;
   package.NumBits = numBits;
@@ -773,7 +789,7 @@ bool IpConnection::writeDataFpga(SensorId::SensorId sens_addr, unsigned char reg
                                  int val) {
   IpComm::Header header;
   header.data_id = IpComm::WRITE_FPGA_REGISTER;
-  VISENSOR_DEBUG("write data fpga register: 0x%x, val: %u\n", reg, val);
+  VISENSOR_DEBUG("write data in fpga register: 0x%08x, val: %10u (0x%08x)\n", reg, val, val);
   IpComm::BusPackage package;
   package.sensor_id = sens_addr;
   package.NumBits = 32;
@@ -874,35 +890,36 @@ bool IpConnection::readInitMsg(unsigned char * msg)
 return true;
 }
 
-uint32_t IpConnection::getTimestampFpgaRaw(uint8_t* buffer)
+uint32_t IpConnection::getTimestampFpgaRaw(const uint8_t* buffer) const
 {
   return (buffer[0]<<24) | (buffer[1]<<16) | (buffer[2]<<8) | (buffer[3]<<0);
 }
 
-uint64_t IpConnection::getTimestamp(uint8_t* buffer)
+uint64_t IpConnection::getTimestampFpga(const uint8_t* buffer)
+{
+  return getTimestampFpga(getTimestampFpgaRaw(buffer));
+}
+
+uint64_t IpConnection::getTimestampFpga(const uint32_t fpga_raw)
+{
+  return time_synchronizer_.extendTimestampWithOverflows(fpga_raw) * 1e9/FPGA_TIME_COUNTER_FREQUENCY + time_synchronizer_.getInitialOffset();
+}
+
+uint64_t IpConnection::getTimestamp(const uint32_t timestamp_raw)
+{
+  return time_synchronizer_.getSynchronizedTime(timestamp_raw);
+}
+
+uint64_t IpConnection::getTimestamp(const uint8_t* buffer)
 {
   //read timestamp  from buffer
   uint32_t packageTimestampRaw = getTimestampFpgaRaw(buffer);
 
-  // FPGA timestamp is in 1/100000[s] -> change to nanoseconds
-  uint64_t timestamp=time_synchronizer_.getSynchronizedTime((uint64_t)packageTimestampRaw*10000);
-
-  return timestamp;
+  return time_synchronizer_.getSynchronizedTime(packageTimestampRaw);
 }
 
 void IpConnection::processPackage(SensorId::SensorId sensor_id, Measurement::Ptr new_measurement)
 {
-
-//  VISENSOR_DEBUG("Payload: ");
-//  for(int i = 0; i<nBytesReceived; i++)
-//  {
-//    if(i%2==0)
-//      VISENSOR_DEBUG(" ");
-//
-//    VISENSOR_DEBUG("%02x",pkt_data[i]);
-//  }
-//  VISENSOR_DEBUG("\n");
-
   if(sensors_.count(sensor_id) == 0)
   {
     VISENSOR_DEBUG("no sensor initialized with sensor id %u\n", sensor_id);
@@ -931,7 +948,6 @@ void IpConnection::processPackage(SensorId::SensorId sensor_id, Measurement::Ptr
                       * sensor->getNumOfMsgsInPackage(), sensor_id);
       return;
     }
-    new_measurement->timestamp_host = time_synchronizer_.getSystemTime();
     sensor->addMeasurement(new_measurement);
   }
   else{
@@ -954,7 +970,8 @@ void IpConnection::processPackage(SensorId::SensorId sensor_id, Measurement::Ptr
       single_measurement->data = boost::shared_ptr<uint8_t>( data_ptr, array_deleter<uint8_t>() );;
       single_measurement->buffer_size = sensor->getMeasurementBufferSize();
       single_measurement->timestamp = new_measurement->timestamp + i*sensor->getTimeBetweenMsgs();
-      single_measurement->timestamp_host = time_synchronizer_.getSystemTime() + i*sensor->getTimeBetweenMsgs();
+      single_measurement->timestamp_synchronized = new_measurement->timestamp_synchronized + i*sensor->getTimeBetweenMsgs();
+      single_measurement->timestamp_host = new_measurement->timestamp_host + i*sensor->getTimeBetweenMsgs();
 
       //fpga timestamp
       uint64_t time_offset_fpga = (i*sensor->getTimeBetweenMsgs() * (uint64_t)FPGA_TIME_COUNTER_FREQUENCY)/(uint64_t)1e9;
@@ -963,7 +980,16 @@ void IpConnection::processPackage(SensorId::SensorId sensor_id, Measurement::Ptr
       sensor->addMeasurement(single_measurement);
     }
   }
-
 }
+
+#ifdef USE_TIMESYNC_LOGGING
+void IpConnection::log_timestamps(std::string str) {
+  std::ofstream logfile;
+  logfile.open (log_filename_, std::ios::out | std::ios::app);
+  logfile << str;
+  logfile.close();
+}
+#endif
+
 
 }  //namespace visensor

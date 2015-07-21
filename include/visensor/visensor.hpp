@@ -34,10 +34,11 @@
 #ifndef VISENSOR_HPP_
 #define VISENSOR_HPP_
 
-#include <visensor/visensor_api.hpp>
-#include <visensor/visensor_version.hpp>
-#include <visensor/visensor_constants.hpp>
-#include <visensor/visensor_datatypes.hpp>
-#include <visensor/visensor_exceptions.hpp>
+#include "visensor/visensor_api.hpp"
+#include "visensor/visensor_config.hpp"
+#include "visensor/visensor_constants.hpp"
+#include "visensor/visensor_datatypes.hpp"
+#include "visensor/visensor_exceptions.hpp"
+#include "visensor/visensor_version.hpp"
 
 #endif //VISENSOR_HPP_

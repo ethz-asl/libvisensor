@@ -34,7 +34,7 @@
 
 //Control symbol exports
 #ifdef VISENSOR_EXPORT
-#   include <config/compiler.hpp>
+#   include "config/compiler.hpp"
 #else
 #   define DSO_EXPORT
 #   define DSO_IMPORT

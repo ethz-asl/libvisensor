@@ -72,6 +72,9 @@ void ImuMpu9150::processMeasurements() {
     // Add imu information to the msg
     imu_msg_ptr->imu_id = Imu::imu_id_;
     imu_msg_ptr->timestamp = meas->timestamp;
+    imu_msg_ptr->timestamp_synchronized = meas->timestamp_synchronized;
+    imu_msg_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+    imu_msg_ptr->timestamp_host = meas->timestamp_host;
     getGyro(meas->data.get(), &imu_msg_ptr->gyro[0]);
     getTemperature(meas->data.get(), &imu_msg_ptr->temperature);
     getAcc(meas->data.get(), &imu_msg_ptr->acc[0]);

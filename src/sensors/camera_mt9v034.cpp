@@ -61,6 +61,7 @@ void CameraMt9v034::init() {
   writeRequest(config_.getConfigParam("chip_control"));
   writeRequest(config_.getConfigParam("min_coarse_shutter_width"));
   writeRequest(config_.getConfigParam("max_coarse_shutter_width"));
+  writeRequest(config_.getConfigParam("aec_low_pass_filter", 2));
   writeRequest(config_.getConfigParam("lvds_shift_clk_ctrl"));
   writeRequest(config_.getConfigParam("lvds_payload_control"));
   writeRequest(config_.getConfigParam("lvds_master_control"));
@@ -160,8 +161,9 @@ void CameraMt9v034::processMeasurements() {
     frame_ptr->height = Camera::config_.height;
     frame_ptr->camera_id = Camera::camera_id_;
     frame_ptr->timestamp = meas->timestamp;
-    frame_ptr->timestamp_host = meas->timestamp_host;
+    frame_ptr->timestamp_synchronized = meas->timestamp_synchronized;
     frame_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+    frame_ptr->timestamp_host = meas->timestamp_host;
 
     frame_ptr->image_type = CameraMt9v034Defaults::IMAGE_TYPE;
 

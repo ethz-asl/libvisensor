@@ -63,9 +63,9 @@ class ExternalTriggerConfig {
   ExternalTriggerConfig(const SensorId::SensorId sensorId)
       : sensor_id_(sensorId) {
     // name, type, register, default, mask, min, max
-    param_server_.addParam("enable_trigger_0", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_CONTROL, 0, 0b1);
-    param_server_.addParam("enable_trigger_1", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_CONTROL, 0, 0b10);
-    param_server_.addParam("enable_trigger_2", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_CONTROL, 0, 0b100);
+    param_server_.addParam("enable_trigger_0", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_CONTROL, 0, 1); // mask=0b1
+    param_server_.addParam("enable_trigger_1", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_CONTROL, 0, 2); // mask=0b10
+    param_server_.addParam("enable_trigger_2", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_CONTROL, 0, 4); // mask=0b100
 
     param_server_.addParam("trigger_0_rate", param_server::UINT_T, ExternalTriggerDefaults::R_EX_TRIGGER0_INTERVAL, 100, 0, 0, 100000);
     param_server_.addParam("trigger_1_rate", param_server::UINT_T, ExternalTriggerDefaults::R_EX_TRIGGER1_INTERVAL, 100, 0, 0, 100000);
@@ -75,9 +75,9 @@ class ExternalTriggerConfig {
     param_server_.addParam("trigger_1_offset", param_server::UINT_T, ExternalTriggerDefaults::R_EX_TRIGGER1_START_OFFSET, 0, 0, 0, 100000);
     param_server_.addParam("trigger_2_offset", param_server::UINT_T, ExternalTriggerDefaults::R_EX_TRIGGER2_START_OFFSET, 0, 0, 0, 100000);
 
-    param_server_.addParam("trigger_0_direction", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_DIRECTION, 0, 0b1); //0 is output, 1 is input
-    param_server_.addParam("trigger_1_direction", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_DIRECTION, 0, 0b10); //0 is output, 1 is input
-    param_server_.addParam("trigger_2_direction", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_DIRECTION, 0, 0b100); //0 is output, 1 is input
+    param_server_.addParam("trigger_0_direction", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_DIRECTION, 0, 1); //0 is output, 1 is input; mask=0b1
+    param_server_.addParam("trigger_1_direction", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_DIRECTION, 0, 2); //0 is output, 1 is input; mask=0b10
+    param_server_.addParam("trigger_2_direction", param_server::BOOL_T, ExternalTriggerDefaults::R_EX_TRIGGER_DIRECTION, 0, 4); //0 is output, 1 is input; mask=0b100
   }
 
   ViConfigMsg getConfigParam(const std::string paramName, uint16_t value) {

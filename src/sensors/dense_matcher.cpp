@@ -33,9 +33,9 @@
 #include <boost/smart_ptr.hpp>
 #include <boost/make_shared.hpp>
 
+#include "helpers/stereo_homography.hpp"
 #include "sensors/dense_matcher.hpp"
 #include "visensor_impl.hpp" // needed by forward declaration
-#include "helpers/stereo_homography.hpp"
 
 // dense control register
 #define R_DENSE_CAM0_CCX 0X04*0
@@ -109,18 +109,22 @@ void DenseMatcher::setCalibration(ViCameraCalibration& calib_cam0, ViCameraCalib
   stereo_homography.getHomography(H0, H1, f, p0, p1);
 
   // write to FPGA
-  float gain = 6400.0;
+  float gain = 6000.0;
 
   const ConfigConnection::Ptr& con = getConfigConnection();
+
+  ViCameraLensModelRadial::Ptr cam0_lens_model = calib_cam0.getLensModel<ViCameraLensModelRadial>();
+  ViCameraLensModelRadial::Ptr cam1_lens_model = calib_cam1.getLensModel<ViCameraLensModelRadial>();
+
   // cam0
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_CCX, static_cast<uint32_t>(p0[0]*256.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_CCY, static_cast<uint32_t>(p0[1]*256.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_FCX, static_cast<uint32_t>(1.0/f*1024.0*1024.0*4.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_FCY, static_cast<uint32_t>(1.0/f*1024.0*1024.0*4.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_KC1, static_cast<uint32_t>(calib_cam0.dist_coeff[0]*1024.0*32.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_KC2, static_cast<uint32_t>(calib_cam0.dist_coeff[1]*1024.0*32.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_PC1, static_cast<uint32_t>(calib_cam0.dist_coeff[2]*f*1024.0*32.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_PC2, static_cast<uint32_t>(calib_cam0.dist_coeff[3]*f*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_KC1, static_cast<uint32_t>(cam0_lens_model->k1_*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_KC2, static_cast<uint32_t>(cam0_lens_model->k2_*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_PC1, static_cast<uint32_t>(cam0_lens_model->r1_*f*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_PC2, static_cast<uint32_t>(cam0_lens_model->r2_*f*1024.0*32.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_H11, static_cast<uint32_t>(H0(0,0)*gain*64.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_H12, static_cast<uint32_t>(H0(0,1)*gain*256.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM0_H13, static_cast<uint32_t>(H0(0,2)*gain*256.0), ViComType::FPGA_32);
@@ -136,10 +140,10 @@ void DenseMatcher::setCalibration(ViCameraCalibration& calib_cam0, ViCameraCalib
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_CCY, static_cast<uint32_t>(p1[1]*256.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_FCX, static_cast<uint32_t>(1.0/f*1024.0*1024.0*4.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_FCY, static_cast<uint32_t>(1.0/f*1024.0*1024.0*4.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_KC1, static_cast<uint32_t>(calib_cam1.dist_coeff[0]*1024.0*32.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_KC2, static_cast<uint32_t>(calib_cam1.dist_coeff[1]*1024.0*32.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_PC1, static_cast<uint32_t>(calib_cam1.dist_coeff[2]*f*1024.0*32.0), ViComType::FPGA_32);
-  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_PC2, static_cast<uint32_t>(calib_cam1.dist_coeff[3]*f*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_KC1, static_cast<uint32_t>(cam0_lens_model->k1_*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_KC2, static_cast<uint32_t>(cam0_lens_model->k2_*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_PC1, static_cast<uint32_t>(cam0_lens_model->r1_*f*1024.0*32.0), ViComType::FPGA_32);
+  con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_PC2, static_cast<uint32_t>(cam0_lens_model->r2_*f*1024.0*32.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_H11, static_cast<uint32_t>(H1(0,0)*gain*64.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_H12, static_cast<uint32_t>(H1(0,1)*gain*256.0), ViComType::FPGA_32);
   con->writeConfig(config_.sensor_id_, 0, R_DENSE_CAM1_H13, static_cast<uint32_t>(H1(0,2)*gain*256.0), ViComType::FPGA_32);
@@ -206,8 +210,9 @@ void DenseMatcher::processMeasurements() {
     frame_ptr->height = Camera::config_.height;
     frame_ptr->camera_id = Camera::camera_id_;
     frame_ptr->timestamp = meas->timestamp;
-    frame_ptr->timestamp_host = meas->timestamp_host;
+    frame_ptr->timestamp_synchronized = meas->timestamp_synchronized;
     frame_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+    frame_ptr->timestamp_host = meas->timestamp_host;
 
     frame_ptr->image_type = DenseMatcherDefaults::IMAGE_TYPE;
 

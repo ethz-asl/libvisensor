@@ -188,37 +188,22 @@ class ParamItemUInt : public AbstractParamItem {
 
 class ParamItemInt : public AbstractParamItem {
  public:
-  ParamItemInt(uint32_t reg, uint32_t def, uint32_t mask) {
-    mask_ = mask;
+  ParamItemInt(uint32_t reg, int32_t def) {
     uint32_t * temp = (uint32_t*) &def;
     default_ = *temp;
     value_ = default_;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(mask_);
-
-    calcDefaultMinMax();
-
-    //VISENSOR_DEBUG("max %u %u\n",tempNumOfBits,_max);
+    min_ = std::numeric_limits<int32_t>::min();
+    max_ = std::numeric_limits<int32_t>::max();
   }
   ;
 
-  ParamItemInt(uint32_t reg, uint32_t def, uint32_t mask, uint32_t minVal, uint32_t maxVal) {
-    mask_ = mask;
+  ParamItemInt(uint32_t reg, int32_t def, int32_t minVal, int32_t maxVal) {
     default_ = def;
     value_ = default_;
     AbstractParamItem::register_ = reg;
-    AbstractParamItem::bit_shift_ = AbstractParamItem::countTrailingZeros(mask_);
-
-    calcDefaultMinMax();
-
-    if (minVal < min_)
-      VISENSOR_DEBUG("MINIMUM %u too small for desired parameter (min %i)!!!\n", minVal, min_);
-    else
-      min_ = minVal;
-    if (maxVal > max_)
-      VISENSOR_DEBUG("MAXIMUM %u too big for desired parameter (max %i)!!!\n", maxVal, max_);
-    else
-      max_ = maxVal;
+    min_ = minVal;
+    max_ = maxVal;
   }
 
   virtual ~ParamItemInt() {
@@ -238,24 +223,12 @@ class ParamItemInt : public AbstractParamItem {
   ;
 
   virtual uint32_t getRegValue(uint32_t prevRegValue) {
-    uint32_t * temp = (uint32_t*) &value_;
-    uint32_t newRegValue = *temp << AbstractParamItem::bit_shift_;
 
-    //VISENSOR_DEBUG("trailing zeros: %u leading zeros %u",AbstractParamItem::countTrailingZeros(_mask),AbstractParamItem::countLeadingZeros(_mask));
-
-    return (prevRegValue & (~mask_)) | (newRegValue & mask_);
+    return value_;
   }
   ;
 
  private:
-  void calcDefaultMinMax() {
-    uint32_t tempNumOfBits = sizeof(uint32_t) * 8 - AbstractParamItem::countLeadingZeros(mask_)
-        - AbstractParamItem::countTrailingZeros(mask_);
-    min_ = 0 - (1 << (tempNumOfBits - 1));
-    max_ = (1 << (tempNumOfBits - 1)) - 1;
-  }
-  ;
-
   int16_t cropVal(int16_t val) {
     if (val < min_) {
       VISENSOR_DEBUG("desired value %u too small\n", val);
@@ -269,7 +242,6 @@ class ParamItemInt : public AbstractParamItem {
   }
   ;
 
-  uint32_t mask_;
   int16_t default_;
   int16_t min_;
   int16_t max_;
@@ -374,7 +346,7 @@ class ParamServer {
     }
 
     if (type == INT_T) {
-      ParamItemInt * newParam = new ParamItemInt(reg, def, mask);
+      ParamItemInt * newParam = new ParamItemInt(reg, def);
       _params[paramName] = newParam;
       //newParam->getValue(0x08,0x04);
     }
@@ -421,8 +393,12 @@ class ParamServer {
     }
 
     if (type == INT_T) {
-      ParamItemInt * newParam = new ParamItemInt(reg, def, mask);  //TODO implement min max
+      // check that mask is not used
+      assert(!(mask == 0 || mask == std::numeric_limits<uint32_t>::max()));
+
+      ParamItemInt * newParam = new ParamItemInt(reg, def, minVal, maxVal);
       _params[paramName] = newParam;
+
       //newParam->getValue(0x08,0x04);
     }
 

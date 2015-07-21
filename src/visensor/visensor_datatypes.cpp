@@ -29,12 +29,10 @@
  *
  */
 
-#include <visensor/visensor_datatypes.hpp>
-
+#include "visensor/visensor_datatypes.hpp"
 
 namespace visensor
 {
-
 ViFrame::ViFrame()
 {
 	allocated_image_bytes=0;
@@ -69,6 +67,5 @@ uint8_t* ViFrame::getImageRawPtr()
 {
 	return image.get();
 }
-
 } //namespace visensor
 

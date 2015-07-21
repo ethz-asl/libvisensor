@@ -33,6 +33,8 @@
 #include <iomanip>
 #include <cmath>
 
+#include "config/config.hpp"
+
 #include "helpers/stereo_homography.hpp"
 
 Eigen::Vector2d compDistortionOulu(const Eigen::Vector2d& xd, const double d[5]) {
@@ -101,25 +103,46 @@ Eigen::Vector3d normalizePixel(const Eigen::Vector2d& x_kk, const double f[2], c
  */
 StereoHomography::StereoHomography(const visensor::ViCameraCalibration& calib_cam0,
                                    const visensor::ViCameraCalibration& calib_cam1)
-: image_width_(0),
-  image_height_(0) {
-  for (int i = 0; i < 2; ++i) {
-    f0_[i] = calib_cam0.focal_point[i];
-    f1_[i] = calib_cam1.focal_point[i];
-    p0_[i] = calib_cam0.principal_point[i];
-    p1_[i] = calib_cam1.principal_point[i];
+: image_width_(752),
+  image_height_(480) {
+  if (calib_cam0.projection_model_->type_ == visensor::ViCameraProjectionModel::ProjectionModelTypes::PINHOLE){
+    visensor::ViCameraProjectionModelPinhole::Ptr cam0_projection_model = calib_cam0.getProjectionModel<visensor::ViCameraProjectionModelPinhole>();
+    visensor::ViCameraProjectionModelPinhole::Ptr cam1_projection_model = calib_cam1.getProjectionModel<visensor::ViCameraProjectionModelPinhole>();
+
+    f0_[0] = cam0_projection_model->focal_length_u_;
+    f0_[1] = cam0_projection_model->focal_length_v_;
+    p0_[0] = cam0_projection_model->principal_point_u_;
+    p0_[1] = cam0_projection_model->principal_point_v_;
+    f1_[0] = cam1_projection_model->focal_length_u_;
+    f1_[1] = cam1_projection_model->focal_length_v_;
+    p1_[0] = cam1_projection_model->principal_point_u_;
+    p1_[1] = cam1_projection_model->principal_point_v_;
   }
-  for (int i = 0; i < 5; ++i) {
-    d0_[i] = calib_cam0.dist_coeff[i];
-    d1_[i] = calib_cam1.dist_coeff[i];
+  else {
+    VISENSOR_DEBUG("current projection model not supported");
+  }
+  if (calib_cam0.lens_model_->type_ == visensor::ViCameraLensModel::LensModelTypes::RADIAL){
+    visensor::ViCameraLensModelRadial::Ptr cam0_lens_model = calib_cam0.getLensModel<visensor::ViCameraLensModelRadial>();
+    visensor::ViCameraLensModelRadial::Ptr cam1_lens_model = calib_cam1.getLensModel<visensor::ViCameraLensModelRadial>();
+    d0_[0] = cam0_lens_model->k1_;
+    d0_[1] = cam0_lens_model->k2_;
+    d0_[2] = cam0_lens_model->r1_;
+    d0_[3] = cam0_lens_model->r2_;
+    d1_[0] = cam1_lens_model->k1_;
+    d1_[1] = cam1_lens_model->k2_;
+    d1_[2] = cam1_lens_model->r1_;
+    d1_[3] = cam1_lens_model->r2_;
+  }
+  else {
+    VISENSOR_DEBUG("Warning: Current lens model not supported.");
   }
   for (int i = 0; i < 3; ++i) {
-    t0_[i] = calib_cam0.t[i];
-    t1_[i] = calib_cam1.t[i];
+    t0_[i] = calib_cam0.t_[i];
+    t1_[i] = calib_cam1.t_[i];
   }
   for (int i = 0; i < 9; ++i) {
-    r0_[i] = calib_cam0.R[i];
-    r1_[i] = calib_cam1.R[i];
+    r0_[i] = calib_cam0.R_[i];
+    r1_[i] = calib_cam1.R_[i];
   }
 }
 
@@ -145,7 +168,6 @@ void StereoHomography::getHomography(Eigen::Matrix3d& H0, Eigen::Matrix3d& H1, d
   Eigen::Matrix4d T_rel = Eigen::Matrix4d::Zero();
   T_rel = T1 * T0.inverse();
 
-  std::cout << "T_rel " << T_rel << std::endl;
   Eigen::Matrix3d R = T_rel.block<3, 3>(0, 0);
   Eigen::Vector3d T = T_rel.block<3, 1>(0, 3);
 
@@ -176,14 +198,12 @@ void StereoHomography::getHomography(Eigen::Matrix3d& H0, Eigen::Matrix3d& H1, d
   Eigen::Matrix3d R2(Eigen::AngleAxisd(ww.norm(), ww.normalized()));
 
   //Global rotations to be applied to both views
-  Eigen::Matrix3d R_1 = R2 * r_1;
-  Eigen::Matrix3d R_0 = R2 * r_0;
+  Eigen::Matrix3d R_1 = R2 * r_0;
+  Eigen::Matrix3d R_0 = R2 * r_1;
 
   //The resulting rigid motion between the two cameras after image rotations (substitutes of om, R and T)
   Eigen::Matrix3d R_new;
   R_new.setIdentity();
-  Eigen::Vector3d om_new = Eigen::Vector3d::Zero();
-  Eigen::Vector3d T_new = R_1 * T;
 
   // Computation of the *new* intrinsic parameters for both left and right cameras
   // Vertical focal length *MUST* be the same for both images (here, we are trying to find a focal length
@@ -199,7 +219,7 @@ void StereoHomography::getHomography(Eigen::Matrix3d& H0, Eigen::Matrix3d& H1, d
     f1_y_new = f1_[1] * (1 + d1_[0] * (pow(image_width_, 2) + pow(image_height_, 2)) / (4 * pow(f1_[1], 2)));
   else
     f1_y_new = f1_[1];
-  double f_y_new = std::min(f0_y_new, f1_y_new);
+  double f_y_new = std::min(f0_y_new, f1_y_new) + 40; //HACK(gohlp): 40 to zoom in, should be automatically
 
   // For simplicity, let's pick the same value for the horizontal focal length as the vertical focal length
   // (resulting into square pixels)
@@ -262,6 +282,9 @@ void StereoHomography::getHomography(Eigen::Matrix3d& H0, Eigen::Matrix3d& H1, d
   //Compute homography
   H0 = C0 * R_0.transpose() * C0_new.inverse();
   H1 = C1 * R_1.transpose() * C1_new.inverse();
+
+  std::cout << "H0 " << H0 << std::endl;
+  std::cout << "H1 " << H1 << std::endl;
 
   f_new = f0_new;
 }

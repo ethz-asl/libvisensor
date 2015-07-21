@@ -37,6 +37,10 @@
 # include <config/config.hpp>
 #endif
 
+#ifdef __APPLE__
+  #include "networking/endian.h" // compatibility header for endian.h
+#endif	/* __APPLE__ */
+
 #include <netinet/in.h> //for ntohl() and htonl()
 #include <boost/array.hpp>
 #include <boost/foreach.hpp>
@@ -49,7 +53,7 @@ enum HeaderType{
   REQUEST_FPGA_INFO,
   FPGA_INFO,
   REQUEST_SENSOR_INFO,
-  SYNC_TIME,
+  HOST_INITIALIZED,
   SENSOR_INFO,
   READ_UBI_REGISTER,
   WRITE_UBI_REGISTER,

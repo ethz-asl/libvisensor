@@ -32,21 +32,39 @@
 #ifndef FILEHANDLER_HPP_
 #define FILEHANDLER_HPP_
 
-#include <config/config.hpp>
-#include <boost/asio.hpp>
+#include <fstream>
+#include <iostream>
+#include <string>
 
-class FileTransfer {
+#include <boost/asio.hpp>
+#include <boost/smart_ptr.hpp>
+
+#include "communication_layers/ssh_connections.hpp"
+#include "config/config.hpp"
+
+namespace visensor {
+
+class DSO_EXPORT FileTransfer
+{
  public:
-  FileTransfer(boost::asio::ip::tcp::socket& socket);
+  typedef boost::shared_ptr<FileTransfer> Ptr;
+  FileTransfer(SshConnection::Ptr connection);
   virtual ~FileTransfer();
 
-  void sendFile(std::string& local_path, std::string& remote_path);
-  void receiveFile(std::string& local_path, std::string& remote_path);
+  virtual void downloadFile(const std::string& local_path, const std::string& remote_path);
+  virtual void uploadFile(const std::string& local_path, const std::string& remote_path,
+                          bool remount = false);
+  virtual void readRemoteFile(const std::string& remote_path, std::string* file_content);
+  virtual void writeRemoteFile(const std::string& remote_path, const std::string& file_content,
+                               bool remount = false);
+  void deleteRemoteFile(const std::string& remote_file, bool remount = false);
 
  private:
-  std::string sendPathString(std::string string);
+  void setFileMountRW(bool RW);
 
-  boost::asio::ip::tcp::socket& socket_;
+  SshConnection::Ptr ssh_connection_;
 };
+
+}
 
 #endif /* FILEHANDLER_HPP_ */

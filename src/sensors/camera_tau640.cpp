@@ -111,8 +111,9 @@ void CameraTau640::processMeasurements(){
 		frame_ptr->height=Camera::config_.height;
 		frame_ptr->camera_id=Camera::camera_id_;
 		frame_ptr->timestamp=meas->timestamp;
-		frame_ptr->timestamp_host = meas->timestamp_host;
+    frame_ptr->timestamp_synchronized = meas->timestamp_synchronized;
 		frame_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+		frame_ptr->timestamp_host = meas->timestamp_host;
 
 		frame_ptr->useCorners=false;
 

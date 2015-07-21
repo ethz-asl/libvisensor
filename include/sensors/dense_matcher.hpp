@@ -58,10 +58,10 @@ class DenseMatcherConfig {
   DenseMatcherConfig(const SensorId::SensorId sensorId)
       : sensor_id_(sensorId) {
     // name, type, register, default, mask, min, max
-    param_server_.addParam("penalty_1", param_server::UINT_T, 0X04 * 40, 2, 0xFFFF, 0, 32765);
-    param_server_.addParam("penalty_2", param_server::UINT_T, 0X04 * 41, 60, 0xFFFF, 0, 32765);
-    param_server_.addParam("threshold", param_server::UINT_T, 0X04 * 42, 255, 0xFFFF, 0, 32765);
-    param_server_.addParam("lr_check", param_server::UINT_T, 0X04 * 43, 5, 0xFFFF, 0, 32765);
+    param_server_.addParam("penalty_1", param_server::UINT_T, 0X04 * 40, 0, 0xFFFF, 0, 255);
+    param_server_.addParam("penalty_2", param_server::UINT_T, 0X04 * 41, 0, 0xFFFF, 0, 255);
+    param_server_.addParam("threshold", param_server::UINT_T, 0X04 * 42, 0, 0xFFFF, 0, 255);
+    param_server_.addParam("lr_check", param_server::UINT_T, 0X04 * 43, 0, 0xFFFF, 0, 32);
   }
 
   ViConfigMsg getConfigParam(const std::string paramName, uint16_t value) {

@@ -72,14 +72,16 @@ void ImuAdis16488::processMeasurements() {
     // Add imu information to the msg
     imu_msg_ptr->imu_id = Imu::imu_id_;
     imu_msg_ptr->timestamp = meas->timestamp;
-    imu_msg_ptr->timestamp_host = meas->timestamp_host;
+    imu_msg_ptr->timestamp_synchronized = meas->timestamp_synchronized;
     imu_msg_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+    imu_msg_ptr->timestamp_host = meas->timestamp_host;
 
     // get imu data
     getGyro(meas->data.get(), &imu_msg_ptr->gyro[0]);
     getAcc(meas->data.get(), &imu_msg_ptr->acc[0]);
     getMag(meas->data.get(), &imu_msg_ptr->mag[0]);
     getBaro(meas->data.get(), &imu_msg_ptr->baro);
+    getTemp(meas->data.get(), &imu_msg_ptr->temperature);
 
     publishImuData(imu_msg_ptr, ViErrorCodes::NO_ERROR);
   }

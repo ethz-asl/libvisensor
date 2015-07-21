@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package>
   <name>libvisensor</name>
-  <version>1.1.0</version>
+  <version>2.2.1</version>
   <description>
 
 	Driver for the communication with the VI-Sensor
@@ -12,7 +12,6 @@
   <maintainer email="pascal.gohl@mavt.ethz.ch">Pascal Gohl</maintainer>
   <license>Propriatary</license>
   <buildtool_depend>catkin</buildtool_depend>
-  
-  <build_depend>eigen</build_depend>
 
+  <build_depend>eigen</build_depend>
 </package>

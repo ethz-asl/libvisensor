@@ -87,8 +87,9 @@ void ExternalTrigger::processMeasurements() {
 
     trigger_msg_ptr->trigger_id = id;
     trigger_msg_ptr->timestamp = meas->timestamp;
-    trigger_msg_ptr->timestamp_host = meas->timestamp_host;
+    trigger_msg_ptr->timestamp_synchronized = meas->timestamp_synchronized;
     trigger_msg_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+    trigger_msg_ptr->timestamp_host = meas->timestamp_host;
     trigger_msg_ptr->event_id = *(uint32_t*)(meas->data.get() + 1); //counts all trigger events (allows for event missed checking)
     publishExternalTriggerData(trigger_msg_ptr);
 

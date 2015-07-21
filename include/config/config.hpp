@@ -36,7 +36,6 @@
 #include <stdint.h>  //uint32, ... types
 
 //include debug helpers for library builds
-#include "compiler.hpp"
 #include "debug.hpp"
 #include "assert.hpp"
 

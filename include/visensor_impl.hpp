@@ -33,13 +33,11 @@
 #define VISENSOR_IMPL_HPP_
 
 #include <config/config.hpp>
-
 #include <boost/thread.hpp>
 #include <boost/smart_ptr.hpp>
 
+#include "config/visensor_configuration.hpp"
 #include "visensor/visensor.hpp"
-#include "visensor/visensor_datatypes.hpp"
-#include "visensor/visensor_exceptions.hpp"
 
 #include "networking/connection.hpp"
 #include "networking/file_transfer.hpp"
@@ -70,6 +68,7 @@ class ViSensorDriver::Impl {
   void startSensor(SensorId::SensorId sensor_id, uint32_t rate = CAMERA_FREQUENCY);
   void stopSensor(SensorId::SensorId sensor_id);
   void setSensorConfigParam(SensorId::SensorId sensor_id, const std::string cmd, uint16_t value);
+  bool isSensorPresent(const SensorId::SensorId sensor_id) const;
 
   void startAllCameras(uint32_t rate = CAMERA_FREQUENCY);
   void setCameraCallback(boost::function<void(ViFrame::Ptr, ViErrorCode)> callback);
@@ -88,10 +87,39 @@ class ViSensorDriver::Impl {
   void startAllDenseMatchers();
   void setDenseMatcherCallback(boost::function<void(ViFrame::Ptr, ViErrorCode)> callback);
 
-  bool getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib, bool* is_camera_flipped = NULL);
-  bool getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib, bool* is_camera_flipped = NULL);
-  bool setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib, bool flip_camera = false);
-  bool setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, bool flip_camera = false);
+  std::vector<ViCameraCalibration> getCameraCalibrations(const SensorId::SensorId cam_id) const;
+  std::vector<ViCameraCalibration> getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                         const int slot_id) const;
+  std::vector<ViCameraCalibration> getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                         const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                         const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const;
+  std::vector<ViCameraCalibration> getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                         const int slot_id,
+                                                         const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                         const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const;
+  std::vector<ViCameraCalibration> getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                         const int slot_id,
+                                                         const int is_flipped,
+                                                         const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                         const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const;
+
+  void setCameraCalibration(const ViCameraCalibration& calib);
+
+  bool cleanCameraCalibrations(const SensorId::SensorId cam_id,
+                               const int slot_id,
+                               const int is_flipped,
+                               const ViCameraLensModel::LensModelTypes lens_model_type,
+                               const ViCameraProjectionModel::ProjectionModelTypes projection_model_type);
+  bool cleanCameraCalibrations(const SensorId::SensorId cam_id,
+                               const int slot_id);
+  bool cleanCameraCalibrations(const SensorId::SensorId cam_id);
+  bool cleanCameraCalibrations();
+
+  void setCameraFactoryCalibration(const ViCameraCalibration calib);
+
+  void setViSensorId(const int vi_sensor_id);
+  int  getViSensorId() const;
+
   bool isStereoCameraFlipped();
   // is called with synchronized images and corresponding corners
   void setFramesCornersCallback(
@@ -106,8 +134,38 @@ class ViSensorDriver::Impl {
   std::vector<SensorId::SensorId> getListOfTriggerIDs() const;
   uint32_t getFpgaId() const;
 
-  void setCameraCalibrationSlot(int slot_id = 0); // slot 0 is factory calibration
-  int getCameraCalibrationSlot();
+  /**
+   * configure/set which calibration should be used for the camera
+   *
+   * @param cam_id:     filters the calibrations for sensor id
+   * @param slot_id:    defines the used slot. 0 is for factory calibration, >0 for customer. <0 means don't care
+   * @param is_flipped: filters calibration for flipped (1) or non flipped (0) calibrations. <0 means don't care
+   * @param lens_model_type:  filters calibration for specific lens model type. set type to unknown if the lens model type does not care
+   * @param projection_model_type:  filters calibration for specific projection model type. set type to unknown if the projection model  type does not care
+   *
+   * @return copy of a vector of matching calibrations
+   */
+  void setCameraCalibrationToUse(const SensorId::SensorId cam_id,
+                                 const int slot_id,
+                                 const int is_flipped,
+                                 const ViCameraLensModel::LensModelTypes lens_model_type,
+                                 const ViCameraProjectionModel::ProjectionModelTypes projection_model_type);
+  void setCameraCalibrationToUse(const int slot_id,
+                                 const int is_flipped,
+                                 const ViCameraLensModel::LensModelTypes lens_model_type,
+                                 const ViCameraProjectionModel::ProjectionModelTypes projection_model_type);
+
+  void setCameraCalibrationToUse();
+
+  /**
+   * returns the configured/ used calibration for the camera
+   *
+   * @param calibration returns the used calibration
+   * @param cam_id:     sensor id
+   *
+   */
+  void getSelectedCameraCalibration(ViCameraCalibration* usedCalibration, const SensorId::SensorId camera_id) const;
+
   void downloadFile(std::string& local_path, std::string& remote_path);
   void uploadFile(std::string& local_path, std::string& remote_path);
 
@@ -127,7 +185,7 @@ class ViSensorDriver::Impl {
 
   bool initialized_;
 
-  int current_camera_calibration_slot_;
+  ViSensorConfiguration::Ptr config_;
 
   std::vector<FrameCornerSynchronizer*> cam_corner_syncronizer_;
 };

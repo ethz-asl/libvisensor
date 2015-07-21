@@ -28,115 +28,104 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
-
+#include <limits>
 #include <sys/time.h>
+
 #include "synchronization/time_synchronizer.hpp"
 
-using namespace TimeSynchronizerValues;
-
-TimeSynchronizer::TimeSynchronizer():_synchronized(false)
+namespace timesync {
+TimeSynchronizer::TimeSynchronizer( const unsigned int stream_id, const uint64_t fpga_tick_time )
+: transmission_time_(-1),  // max unsigned
+  initial_offset_(0),
+  stream_id_(stream_id),
+  clock_mapper_(MINIMAL_STABLE_DRIFT_TIME_IN_S * visensor::SECOND_IN_NANOSECOND, fpga_tick_time),  // switching time is in ns seconds, tick cycle time has to be given
+  num_overflows_(0),
+  last_timestamp_(0),
+  FPGA_TIC_TIME(fpga_tick_time),
+  POSSIBLE_OLDER_TIMESTAMP(500e6/ fpga_tick_time ) // allow up to 500ms older timestamps before assuming its an overflow
 {
-	_offset_tracker=0;
-	_initial_offset=0;
-	_previous_timestamp=0;
-	_counter=0;
-	_offset=0;
-	unusable_frames_counter_=0;
-	_timeFpgaAtUpdate=0;
-	_offsetBeforeUpdate=0;
 }
 
-void TimeSynchronizer::init(uint64_t time_fpga)
+void TimeSynchronizer::updateTime(const uint32_t fpga_time, const uint64_t pc_receipt_time)
 {
-	init(getSystemTime(), time_fpga);
+  uint64_t time_fpga_long = extendTimestampWithOverflows(fpga_time);
+  clock_mapper_.update(time_fpga_long, pc_receipt_time);
 }
 
-
-void TimeSynchronizer::init(uint64_t time_pc, uint64_t time_fpga)
+void TimeSynchronizer::initialUpdate(const uint64_t pc_request_time, const uint32_t fpga_time,
+                                     const uint64_t pc_receipt_time)
 {
-	_initial_offset=time_pc-time_fpga;
-	_synchronized=true;
+  uint64_t time_fpga_long = extendTimestampWithOverflows(fpga_time);
+  clock_mapper_.update(time_fpga_long, pc_receipt_time);
+
+  // find and save minimal transmission time (assumes symmetric transmission time)
+  if (transmission_time_ > (pc_receipt_time - pc_request_time) / 2) {
+    transmission_time_ = (pc_receipt_time - pc_request_time) / 2;
+    initial_offset_ = pc_receipt_time - transmission_time_ - fpga_time * FPGA_TIC_TIME;
+  }
 }
 
-void TimeSynchronizer::updateTime(uint64_t time_fpga)
-{
-	updateTime(getSystemTime(), time_fpga);
-}
-
-void TimeSynchronizer::updateTime(uint64_t time_pc, uint64_t time_fpga)
-{
-//WARNING(schneith): leica code assumes that the clock offset/skew is fixed for all msgs
-
-// detect fpga time wrap around
-//if(time_fpga<_previous_timestamp)
-//{
-//  _initial_offset += (uint64_t)0xFFFFFFFF+1;
-//}
-//_previous_timestamp = time_fpga;
-
-//	// ignore first 10 frames
-//	if(unusable_frames_counter_<SKIP_FIRST_N)
-//	{
-//		unusable_frames_counter_++;
-//		return;
-//	}
-//
-//
-//	_offset_tracker+=(time_pc-_initial_offset-time_fpga);
-//	++_counter;
-//
-//	if(_counter<NUM_OF_MEASUREMENTS)
-//		return;
-//
-//
-//	//VISENSOR_DEBUG("offset tracker: %lu offset time: %lu\n",(time_pc-_initial_offset)/1000000, time_fpga/1000000);
-//	double diff;
-//	diff=(double)_offset_tracker/NUM_OF_MEASUREMENTS-(double)_offset;
-//	//diff=(double)_offset_tracker-(double)_offset;
-//
-//	// update offset
-//	if(synchronized_)
-//	{
-////		_offsetBeforeUpdate=_offset;
-////		_timeFpgaAtUpdate=time_fpga;
-////		_offset+=(int64_t)(TIME_KALMAN_GAIN*diff);
-//	}
-//	else // on first run don't use kalman gain
-//	{
-//		_offset=(int64_t)(diff);
-//		_offsetBeforeUpdate=_offset;
-//		_synchronized=true;
-//	}
-//
-//	VISENSOR_DEBUG("offset tracker: %li update: %li timediff fpga-pc: %li\n",_offset, (int64_t)(TIME_KALMAN_GAIN*diff),_offset_tracker-_offset);
-//
-//	_offset_tracker=0;
-//	_counter=0;
-}
 
 // returns synchronized time in nanoseconds
-uint64_t TimeSynchronizer::getSynchronizedTime(uint64_t time_fpga)
+uint64_t TimeSynchronizer::getSynchronizedTime(const uint32_t time_fpga)
 {
-  //TODO(schneith): fpga counter will overflow after ~11h (32bit @ 100kHz) --> handle this here?
-    return time_fpga+_initial_offset;
-/*
-	// take old offset for messages captured before the update
-	if(time_fpga>_timeFpgaAtUpdate)
-		return time_fpga+_initial_offset+_offset;
-	else
-		return time_fpga+_initial_offset+_offsetBeforeUpdate;
-*/
+  uint64_t estLocalTime;
+  uint64_t time_fpga_long = extendTimestampWithOverflows(time_fpga);
+  if (clock_mapper_.isStable()){
+    estLocalTime = clock_mapper_.getLocalTime(time_fpga_long) - transmission_time_;
+  }
+  else{
+    VISENSOR_DEBUG("clock_mapper_ not ready\n");
+    estLocalTime = static_cast<uint64_t>(time_fpga) * FPGA_TIC_TIME - transmission_time_;
+  }
+  return estLocalTime;
 }
 
 // get system time in nanoseconds
 uint64_t TimeSynchronizer::getSystemTime()
 {
-	//timespec ts;
-	// clock_gettime(CLOCK_MONOTONIC, &ts); // Works on FreeBSD
-	//clock_gettime(CLOCK_REALTIME, &ts); // Works on Linux
-	//return (uint64_t)(ts.tv_sec) * 1000000000 + (uint64_t)(ts.tv_nsec);
-
-	 timeval tv;
-	 gettimeofday(&tv,NULL);
-	 return (uint64_t)tv.tv_sec * 1000000000 + (uint64_t)tv.tv_usec * 1000;
+  timeval tv;
+  gettimeofday(&tv, NULL);
+  return (uint64_t) tv.tv_sec * 1000000000 + (uint64_t) tv.tv_usec * 1000;
 }
+
+// get estimated slope
+double TimeSynchronizer::getSlope()
+{
+  return clock_mapper_.getSkew();
+}
+
+// get estimated offset
+uint64_t TimeSynchronizer::getOffset()
+{
+  return clock_mapper_.getOffset();
+}
+
+uint64_t TimeSynchronizer::extendTimestampWithOverflows(const uint32_t& timestamp)
+{
+  uint32_t imax = std::numeric_limits<uint32_t>::max();
+  int64_t time_diff = static_cast<int64_t>(timestamp) - last_timestamp_;
+
+  if (time_diff < -POSSIBLE_OLDER_TIMESTAMP) {
+    num_overflows_++;
+    VISENSOR_DEBUG("remote time overflow occurred or the timestamp is much older then the last one.\n");
+    VISENSOR_DEBUG("nb_overflows; %lu ; timestamp; %u; last_timestamp_; %lu\n",
+                   num_overflows_, timestamp, last_timestamp_);
+  }
+  else if (time_diff > (imax-POSSIBLE_OLDER_TIMESTAMP)) {
+    num_overflows_--;
+    VISENSOR_DEBUG("a huge step forward occured or the timestamp is much "
+        "older then the last one and jumped over the overflow.\n");
+    VISENSOR_DEBUG("nb_overflows; %lu ; timestamp; %u; last_timestamp_; %lu\n",
+                   num_overflows_, timestamp, last_timestamp_);
+
+    }
+
+
+  uint64_t extended_timestamp = static_cast<uint64_t>(timestamp) + num_overflows_ * static_cast<uint64_t>(imax);
+  last_timestamp_ = static_cast<int64_t>(timestamp);
+
+  return extended_timestamp;
+}
+
+}  // namespace timesync

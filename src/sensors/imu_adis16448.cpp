@@ -85,14 +85,16 @@ void ImuAdis16448::processMeasurements() {
 	// Add imu information to the msg
 	imu_msg_ptr->imu_id = Imu::imu_id_;
 	imu_msg_ptr->timestamp=meas->timestamp;
-	imu_msg_ptr->timestamp_host = meas->timestamp_host;
+  imu_msg_ptr->timestamp_synchronized = meas->timestamp_synchronized;
 	imu_msg_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+	imu_msg_ptr->timestamp_host = meas->timestamp_host;
 
     // get imu data
     getGyro(meas->data.get(), &imu_msg_ptr->gyro[0]);
     getAcc(meas->data.get(), &imu_msg_ptr->acc[0]);
     getMag(meas->data.get(), &imu_msg_ptr->mag[0]);
     getBaro(meas->data.get(), &imu_msg_ptr->baro);
+    getTemp(meas->data.get(), &imu_msg_ptr->temperature);
 
 		publishImuData(imu_msg_ptr, ViErrorCodes::NO_ERROR);
 	}
@@ -233,10 +235,10 @@ void ImuAdis16448::getBaro(uint8_t * buffer, double * baro)
 
 void ImuAdis16448::getTemp(uint8_t * buffer, double * temp)
 {
-  int current_pos = 6 * 3 + 4 * 2;
+  int current_pos = 6 * 2 + 4 * 2;
   int temp_int = (int) ((buffer[current_pos + 0] << 8)
       | (buffer[current_pos + 1] << 0));
-  *temp = static_cast<double>(temp_int);
+  *temp = static_cast<double>(temp_int)*0.07386 + 31.0;
 }
 
 

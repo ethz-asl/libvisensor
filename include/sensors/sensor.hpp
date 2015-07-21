@@ -61,6 +61,8 @@ struct Measurement {
         buffer_size(0),
         bytes_in_buffer(0),
         timestamp(0),
+        timestamp_synchronized(0),
+        timestamp_fpga_counter(0),
         timestamp_host(0) {
   }
   ~Measurement() {
@@ -69,9 +71,10 @@ struct Measurement {
   boost::shared_ptr<uint8_t> data;
   uint32_t buffer_size;
   uint32_t bytes_in_buffer;
-  uint64_t timestamp;
-  uint64_t timestamp_host;
-  uint32_t timestamp_fpga_counter; //raw fpga counter timestamp (1e-5 s)
+  uint64_t timestamp; /* FPGA time of the message in nano seconds and corrected with an initial offset */
+  uint64_t timestamp_synchronized; /* FPGA time of the message in nano seconds and corrected with a internal time synchronization model*/
+  uint32_t timestamp_fpga_counter; /* raw fpga counter timestamp (1e-5 s) */
+  uint64_t timestamp_host; /* time when the message was received on host*/
 };
 
 struct SensorSettings {

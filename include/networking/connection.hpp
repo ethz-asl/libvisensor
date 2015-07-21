@@ -32,20 +32,21 @@
 #ifndef IP_CONNECTION_
 #define IP_CONNECTION_
 
-#include <config/config.hpp>
-
 #include <vector>
 #include <map>
+
 #include <boost/asio.hpp>
 #include <boost/smart_ptr.hpp>
 
-#include "visensor/visensor_datatypes.hpp"
-#include "synchronization/time_synchronizer.hpp"
-#include "networking/ip_data_definitions.hpp"
-#include "networking/file_transfer.hpp"
+#include "communication_layers/ssh_connections.hpp"
+#include "config/config.hpp"
 #include "networking/config_connection.hpp"
-#include "serial_bridge/SerialHost.hpp"
+#include "networking/file_transfer.hpp"
+#include "networking/ip_data_definitions.hpp"
 #include "sensors/sensor.hpp"
+#include "synchronization/time_synchronizer.hpp"
+#include "visensor/visensor_datatypes.hpp"
+#include "serial_bridge/serial_host.hpp"
 
 namespace visensor {
 
@@ -70,6 +71,9 @@ class IpConnection : public visensor::ConfigConnection {
   typedef boost::shared_ptr<IpConnection> Ptr;
   typedef boost::weak_ptr<IpConnection> WeakPtr;
 
+
+  static constexpr uint64_t STARTUP_TIMEOUT = 4 * SECOND_IN_NANOSECOND;
+
   IpConnection();
   ~IpConnection();
 
@@ -85,9 +89,6 @@ class IpConnection : public visensor::ConfigConnection {
   void addSensor(SensorId::SensorId sensor_id, Sensor::Ptr sensor);
   void startSensor(SensorId::SensorId sensor_id, uint32_t rate);
   void stopSensor(SensorId::SensorId sensor_id);
-
-  bool readCameraCalibration(SensorId::SensorId sensor_id, unsigned int slot_id, ViCameraCalibration &calib_out);
-  bool writeCameraCalibration(SensorId::SensorId sensor_id, unsigned int slot_id, const ViCameraCalibration calib);
 
   //serial bridge communication
   void registerSerialHost(SerialHost::WeakPtr serial_host);
@@ -110,14 +111,20 @@ class IpConnection : public visensor::ConfigConnection {
   virtual void readConfig(SensorId::SensorId sensor_id, uint8_t dev_adress, uint8_t reg,
                           uint32_t &val, uint8_t comType);
 
-  void downloadFile(std::string& local_path, std::string& remote_path);
-  void uploadFile(std::string& local_path, std::string& remote_path);
 
   std::vector<IpComm::SensorInfo> getAttachedSensors();
 
+  inline FileTransfer::Ptr file_transfer() const {
+    return file_transfer_;
+  }
+
+  inline SshConnection::Ptr ssh_connection() const {
+    return ssh_connection_;
+  }
+
  private:
   void readFpgaInfo();
-  void syncTime();
+  void initialSyncTime();
 
   bool sendHeader(int identifier);
   void sendStartSensor(SensorId::SensorId sensor_id, uint32_t rate);
@@ -132,9 +139,14 @@ class IpConnection : public visensor::ConfigConnection {
   bool writeDataFpga(SensorId::SensorId sensor_id, unsigned char reg, int val);
   bool readDataFpga(SensorId::SensorId sensor_id, unsigned char reg, int &val);
   bool readInitMsg(unsigned char * msg);
+  //RW: true ==> read-write, RW: false ==> read-only
+  void setSensorMountRW(const bool read_write = false) const;
 
-  uint32_t getTimestampFpgaRaw(uint8_t* buffer);
-  uint64_t getTimestamp(uint8_t* buffer);
+  uint32_t getTimestampFpgaRaw(const uint8_t* buffer) const;
+  uint64_t getTimestampFpga(const uint32_t fpga_raw);
+  uint64_t getTimestampFpga(const uint8_t* buffer);
+  uint64_t getTimestamp(const uint8_t* buffer);
+  uint64_t getTimestamp(const uint32_t timestamp_raw);
 
   void processPackage(SensorId::SensorId sensor_id, Measurement::Ptr new_measurement);
   void read_handler(const boost::system::error_code& e,
@@ -157,14 +169,25 @@ class IpConnection : public visensor::ConfigConnection {
   void receive_payload(boost::asio::ip::tcp::socket &socket, boost::array<T, N>& data);
 
   IpComm::Header readHeader(boost::asio::ip::tcp::socket &socket);
+#ifdef USE_TIMESYNC_LOGGING
+  void log_timestamps(std::string str);
+#endif
 
  private:
   bool connected_;
-  TimeSynchronizer time_synchronizer_;
+  timesync::TimeSynchronizer time_synchronizer_;
   uint8_t number_of_sensors_;
+  uint64_t first_host_timestamp_;
   std::map<SensorId::SensorId, Sensor::Ptr> sensors_;
   SensorId::SensorId led_sensor_id_;  // HACK: either add the light to the cam options or create a led sensor class
   FpgaConfig fpga_config_;
+
+#ifdef USE_TIMESYNC_LOGGING
+  #define LOG_TIMESTAMP(...) log_timestamps(__VA_ARGS__)
+  const std::string log_filename_="timestamps.log";
+#else
+  #define LOG_TIMESTAMP(...) Sink { __VA_ARGS__ }
+#endif
 
   //pointer to serialhost
   SerialHost::WeakPtr serial_host_;
@@ -175,11 +198,13 @@ class IpConnection : public visensor::ConfigConnection {
   boost::asio::ip::tcp::socket imu_socket_;
   boost::asio::ip::tcp::socket serial_socket_;
   boost::asio::ip::tcp::socket config_socket_;
+  boost::asio::ip::tcp::socket time_sync_socket_;
   IpComm::HeaderPayload data_header_payload_;
   IpComm::HeaderPayload imu_header_payload_;
   IpComm::HeaderPayload serial_header_payload_;
 
-  FileTransfer file_transfer_;
+  FileTransfer::Ptr file_transfer_;
+  SshConnection::Ptr ssh_connection_;
 };
 }  //namespace visensor
 

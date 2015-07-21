@@ -36,13 +36,13 @@
 #include <boost/bind.hpp>
 #include <boost/lexical_cast.hpp>
 
-#include "visensor/visensor_exceptions.hpp"
 #include "networking/auto_discovery.hpp"
 #include "sensors/sensor_factory.hpp"
 #include "sensors/dense_matcher.hpp"
-#include "serial_bridge/SerialHost.hpp"
+#include "visensor/visensor_exceptions.hpp"
 
 #include "visensor_impl.hpp"
+#include "serial_bridge/serial_host.hpp"
 
 namespace visensor {
 
@@ -56,18 +56,21 @@ std::string ViSensorDriver::Impl::initAutodiscovery()
 {
   boost::asio::io_service io_service_;
   AutoDiscovery sensor_finder(13779);
-  ViDeviceList sensor_list = sensor_finder.findSensor();
+  ViDeviceList sensor_ip_list = sensor_finder.findSensor();
 
-  if (sensor_list.empty())
+  if (sensor_ip_list.empty())
     throw visensor::exceptions::ConnectionException("Autodiscovery: could not find a sensor.");
 
-  //connected to the sensor that responded first to autodiscovery requests
-  std::string sensor_address = sensor_list[0];
+  if (sensor_ip_list.size() > 1)
+    throw visensor::exceptions::ConnectionException("Autodiscovery: found more than one sensor. Please set sensor IP.");
+
+  //found only one sensor, thus connect to it
+  std::string sensor_ip = sensor_ip_list[0];
 
   //init with found IP address
-  init(sensor_address);
+  init(sensor_ip);
 
-  return sensor_address;
+  return sensor_ip;
 }
 
 void ViSensorDriver::Impl::getAutoDiscoveryDeviceList(ViDeviceList &hostname_list)
@@ -78,9 +81,19 @@ void ViSensorDriver::Impl::getAutoDiscoveryDeviceList(ViDeviceList &hostname_lis
   hostname_list = sensor_finder.findSensor();
 }
 
-void ViSensorDriver::Impl::init(std::string hostname) {
+void ViSensorDriver::Impl::init(std::string sensor_ip) {
   // create fpga interface
-  ip_connection_->connect(hostname);
+  ip_connection_->connect(sensor_ip);
+
+  config_ = boost::make_shared<ViSensorConfiguration>(ip_connection_->file_transfer());
+
+  if (!config_->isValid()) {
+    if (!config_->loadConfig() ) {
+      throw visensor::exceptions::ConfigException("Could not load the configuration from the sensor!");
+    }
+  }
+
+  VISENSOR_DEBUG("Connection established with VISensor %i\n", config_->getViSensorId());
 
   // get a list of all sensors connected to the fpga
   std::vector<IpComm::SensorInfo> sensor_list = ip_connection_->getAttachedSensors();
@@ -100,30 +113,13 @@ void ViSensorDriver::Impl::init(std::string hostname) {
   serial_host_ = boost::make_shared<SerialHost>();
   ip_connection_->registerSerialHost(serial_host_);
 
+
   //set initialized flag
   initialized_ = true;
 
-  // set default cxamera calibration
-  try {
-    setCameraCalibrationSlot(0);
-  }
-  catch (visensor::exceptions const &ex) {
-//     std::cout << ex.what() << "\n";
-  }
-
-  //flip images if necessary
-  for (Sensor::IdMap::const_iterator it = sensors_.begin();
-      it != sensors_.end(); ++it) {
-    if (it->second->type() == SensorType::CAMERA_MT9V034){
-      ViCameraCalibration calib;
-      bool is_camera_flipped;
-      getCameraCalibration(it->first, calib, &is_camera_flipped);
-      if (it->first !=visensor::SensorId::CAM0)//Taking care of legacy stuff...
-        is_camera_flipped = !is_camera_flipped;
-
-      setSensorConfigParam(it->first, "row_flip", is_camera_flipped);
-      setSensorConfigParam(it->first, "column_flip", is_camera_flipped);
-    }
+//  load configuration
+  if ( !config_->loadConfig()) {
+    VISENSOR_DEBUG("ViSensorDriver::Impl: failed to load the configuration\n");
   }
 }
 
@@ -179,7 +175,6 @@ void ViSensorDriver::Impl::setCameraCallback(
 
 void ViSensorDriver::Impl::setImuCallback(
     boost::function<void(boost::shared_ptr<ViImuMsg>, ViErrorCode)> callback) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
@@ -192,7 +187,6 @@ void ViSensorDriver::Impl::setImuCallback(
 }
 
 void ViSensorDriver::Impl::startSensor(SensorId::SensorId sensor_id, uint32_t rate) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   // check if id is valid
@@ -211,7 +205,6 @@ void ViSensorDriver::Impl::startSensor(SensorId::SensorId sensor_id, uint32_t ra
 }
 
 void ViSensorDriver::Impl::stopSensor(SensorId::SensorId sensor_id) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   // check if id is valid
@@ -225,7 +218,6 @@ void ViSensorDriver::Impl::stopSensor(SensorId::SensorId sensor_id) {
 }
 
 void ViSensorDriver::Impl::startAllImus(uint32_t rate) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
@@ -238,7 +230,6 @@ void ViSensorDriver::Impl::startAllImus(uint32_t rate) {
 }
 
 std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfSensorIDs() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   std::vector<SensorId::SensorId> list_of_sensors;
@@ -250,7 +241,6 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfSensorIDs() const
 }
 
 std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfCameraIDs() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   std::vector<SensorId::SensorId> list_of_cameras;
@@ -265,7 +255,6 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfCameraIDs() const
 }
 
 std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfDenseIDs() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   std::vector<SensorId::SensorId> list_of_dense;
@@ -278,7 +267,6 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfDenseIDs() const 
 }
 
 std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfImuIDs() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   std::vector<SensorId::SensorId> list_of_imus;
@@ -293,7 +281,6 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfImuIDs() const {
 }
 
 std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfCornerIDs() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   std::vector<SensorId::SensorId> list_of_corners;
@@ -306,7 +293,6 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfCornerIDs() const
 }
 
 std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfTriggerIDs() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   std::vector<SensorId::SensorId> list_of_triggers;
@@ -319,7 +305,6 @@ std::vector<SensorId::SensorId> ViSensorDriver::Impl::getListOfTriggerIDs() cons
 }
 
 uint32_t ViSensorDriver::Impl::getFpgaId() const {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   return ip_connection_->getId();
@@ -328,7 +313,6 @@ uint32_t ViSensorDriver::Impl::getFpgaId() const {
 void ViSensorDriver::Impl::setSensorConfigParam(SensorId::SensorId sensor_id,
                                                   std::string cmd,
                                                   uint16_t value) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   // check if id is valid
@@ -349,10 +333,9 @@ void ViSensorDriver::Impl::setSensorConfigParam(SensorId::SensorId sensor_id,
 
 void ViSensorDriver::Impl::downloadFile(std::string& local_path,
                                           std::string& remote_path) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  ip_connection_->downloadFile(local_path, remote_path);
+  ip_connection_->file_transfer()->downloadFile(local_path, remote_path);
 }
 
 void ViSensorDriver::Impl::startAllExternalTriggers(uint32_t rate) {
@@ -365,7 +348,6 @@ void ViSensorDriver::Impl::startAllExternalTriggers(uint32_t rate) {
 
 void ViSensorDriver::Impl::setExternalTriggerCallback(
     boost::function<void(ViExternalTriggerMsg::Ptr)> callback) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
@@ -389,7 +371,6 @@ void ViSensorDriver::Impl::setExternalTriggerConfig(const ViExternalTriggerConfi
 }
 
 void ViSensorDriver::Impl::startAllDenseMatchers() {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
@@ -401,7 +382,6 @@ void ViSensorDriver::Impl::startAllDenseMatchers() {
 
 void ViSensorDriver::Impl::setDenseMatcherCallback(
     boost::function<void(ViFrame::Ptr, ViErrorCode)> callback) {
-
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
@@ -411,35 +391,59 @@ void ViSensorDriver::Impl::setDenseMatcherCallback(
   }
 }
 
-void ViSensorDriver::Impl::setCameraCalibrationSlot(int slot_id /* = 0 */) {
+void ViSensorDriver::Impl::setCameraCalibrationToUse(const SensorId::SensorId cam_id,
+                                                     const int slot_id,
+                                                     const int is_flipped,
+                                                     const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                     const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) {
+  std::vector<ViCameraCalibration> calibrations;
+  calibrations = getCameraCalibrations(cam_id, slot_id, is_flipped, lens_model_type, projection_model_type);
 
-  ViCameraCalibration calib_cam0, calib_cam1;
-  std::stringstream exception_msg;
+  if (calibrations.size() > 1)
+    throw visensor::exceptions::ConfigException("More than one calibration found. Please specify the calibration to use more specific.");
+  if (calibrations.size() == 0)
+    throw visensor::exceptions::ConfigException("No calibration were found. Please select an existing calibration");
 
-  // read calibrations from sensor
-  if(getCameraCalibration(SensorId::CAM0, slot_id, calib_cam0) == false)
-    exception_msg << "Calibration of CAM0 in slot " << slot_id << " not found.\n";
-  if(getCameraCalibration(SensorId::CAM1, slot_id, calib_cam1) == false)
-    exception_msg << "Calibration of CAM1 in slot " << slot_id << " not found.\n";
+  bool is_camera_flipped = is_flipped;
+  if (cam_id !=visensor::SensorId::CAM0)//Taking care of legacy stuff...
+    is_camera_flipped = !is_flipped;
 
-  if(exception_msg.str().size() > 0)
-     throw visensor::exceptions::SensorException(exception_msg.str());
+  setSensorConfigParam(cam_id, "row_flip", is_camera_flipped);
+  setSensorConfigParam(cam_id, "column_flip", is_camera_flipped);
+  config_->selectCameraCalibration(calibrations.front(), cam_id);
+}
+
+void ViSensorDriver::Impl::setCameraCalibrationToUse(const int slot_id,
+                                                     const int is_flipped,
+                                                     const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                     const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) {
+  //flip images if necessary
+  for (Sensor::IdMap::const_iterator it = sensors_.begin();
+      it != sensors_.end(); ++it) {
+    if (it->second->type() == SensorType::CAMERA_MT9V034){
+      setCameraCalibrationToUse(static_cast<SensorId::SensorId>(it->first), slot_id, is_flipped, lens_model_type, projection_model_type);
+    }
+  }
 
   // apply calibrations
   for (Sensor::IdMap::const_iterator it = sensors_.begin();
       it != sensors_.end(); ++it) {
     if (it->second->type() == SensorType::DENSE_MATCHER) {
       DenseMatcher::Ptr dense_matcher = boost::static_pointer_cast<DenseMatcher>(it->second);
-      dense_matcher->setCalibration(calib_cam0, calib_cam1);
+      ViCameraCalibration cam0_calibration, cam1_calibration;
+      config_->getSelectedCameraCalibration(&cam0_calibration, SensorId::SensorId::CAM0);
+      config_->getSelectedCameraCalibration(&cam1_calibration, SensorId::SensorId::CAM1);
+      dense_matcher->setCalibration( cam0_calibration, cam1_calibration);
     }
   }
-
-  current_camera_calibration_slot_ = slot_id;
 }
 
-int ViSensorDriver::Impl::getCameraCalibrationSlot() {
+void ViSensorDriver::Impl::setCameraCalibrationToUse() {
+  setCameraCalibrationToUse(-1, -1, ViCameraLensModel::LensModelTypes::UNKNOWN, ViCameraProjectionModel::ProjectionModelTypes::UNKNOWN);
+}
 
-  return current_camera_calibration_slot_;
+void ViSensorDriver::Impl::getSelectedCameraCalibration(ViCameraCalibration* usedCalibration, const SensorId::SensorId camera_id) const {
+  config_->getSelectedCameraCalibration(usedCalibration, camera_id);
 }
 
 void ViSensorDriver::Impl::sendSerialData(ViSerialData::Ptr data)
@@ -477,7 +481,7 @@ void ViSensorDriver::Impl::uploadFile(std::string& local_path,
 
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
 
-  ip_connection_->uploadFile(local_path, remote_path);
+  ip_connection_->file_transfer()->uploadFile(local_path, remote_path);
 }
 
 void ViSensorDriver::Impl::setCornerCallback(
@@ -522,7 +526,7 @@ void ViSensorDriver::Impl::setFramesCornersCallback(
           boost::bind(
               &FrameCornerSynchronizer::addFrame,
               cam_corner_syncronizer_[cam_corner_syncronizer_.size() - 1], _1));
-  }
+    }
   }
 }
 
@@ -537,37 +541,61 @@ void ViSensorDriver::Impl::startAllCorners() {
   }
 }
 
-
-bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, ViCameraCalibration &calib, bool* is_camera_flipped){
-
-  return getCameraCalibration(cam_id, current_camera_calibration_slot_, calib, is_camera_flipped);
+std::vector<ViCameraCalibration> ViSensorDriver::Impl::getCameraCalibrations(const SensorId::SensorId cam_id) const {
+  return getCameraCalibrations(cam_id, -1, -1, ViCameraLensModel::LensModelTypes::UNKNOWN, ViCameraProjectionModel::ProjectionModelTypes::UNKNOWN);
 }
 
-bool ViSensorDriver::Impl::getCameraCalibration(SensorId::SensorId cam_id, int slot_id, ViCameraCalibration &calib, bool* is_camera_flipped){
+std::vector<ViCameraCalibration> ViSensorDriver::Impl::getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                                             const int slot_id) const {
+  return getCameraCalibrations(cam_id, slot_id, -1, ViCameraLensModel::LensModelTypes::UNKNOWN, ViCameraProjectionModel::ProjectionModelTypes::UNKNOWN);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::Impl::getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                                             const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                                             const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const {
+  return getCameraCalibrations(cam_id, -1, -1, lens_model_type, projection_model_type);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::Impl::getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                                             const int slot_id,
+                                                                             const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                                             const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const {
+  return getCameraCalibrations(cam_id, slot_id, -1, lens_model_type, projection_model_type);
+}
+
+std::vector<ViCameraCalibration> ViSensorDriver::Impl::getCameraCalibrations(const SensorId::SensorId cam_id,
+                                                                             const int slot_id,
+                                                                             const int is_flipped,
+                                                                             const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                                             const ViCameraProjectionModel::ProjectionModelTypes projection_model_type) const {
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
-  if (ip_connection_->readCameraCalibration(cam_id, 2*slot_id, calib)){
-    if (is_camera_flipped != NULL)
-      *is_camera_flipped = false;
-    return true;
+  if (config_->isValid() != true) {
+    if (config_->loadConfig() != true) {
+      throw visensor::exceptions::ConfigException("Could not load the configuration from the sensor!");
+    }
   }
-  else if(ip_connection_->readCameraCalibration(cam_id, 2*slot_id + 1, calib)){
-    if (is_camera_flipped != NULL)
-      *is_camera_flipped = true;
-    return true;
-  }
-  //We dont know whether camera is flipped or not. Lets set it to false (default)
-  if (is_camera_flipped != NULL)
-    *is_camera_flipped = false;
-  return false;
+  return config_->getCameraCalibrations(cam_id, slot_id, is_flipped, lens_model_type, projection_model_type);
 }
 
 //Internally, we divide up the slots for flipped cameras (uneven slot_ids) and unflipped cameras (even slot_ids)
-bool ViSensorDriver::Impl::setCameraCalibration(SensorId::SensorId cam_id, int slot_id, const ViCameraCalibration calib, bool flip_camera){
+void ViSensorDriver::Impl::setCameraCalibration(const ViCameraCalibration& calib){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+
+  if (config_->isValid() != true) {
+    throw visensor::exceptions::ConfigException("Load general calibration first before setting any calibration to avoid overwite of existing configuration");
+  }
   //slot 0 holds the factory calibration and can't be overwritten using the public API
-  if(slot_id == 0)
-    return false;
-  return ip_connection_->writeCameraCalibration(cam_id, 2*slot_id + static_cast<unsigned int>(flip_camera), calib);
+  int slot_id = calib.slot_id_;
+  if (slot_id == 0){
+    throw visensor::exceptions::ConfigException("Slot ID 0 is reserved for the factory calibrations");
+  }
+
+  if (!config_->setCameraCalibration(calib)) {
+    throw visensor::exceptions::ConfigException("Failed to set camera calibration.");
+  }
+  if (!config_->saveConfig()) {
+    throw visensor::exceptions::ConnectionException("Failed to store the configuration on the sensor");
+  }
 }
 
 //Check if stereo camera is flipped
@@ -577,17 +605,97 @@ bool ViSensorDriver::Impl::isStereoCameraFlipped()
   bool is_cam0_flipped = false;
   bool is_cam1_flipped = false;
 
-  ViCameraCalibration calib;
-  getCameraCalibration(visensor::SensorId::CAM0, calib, &is_cam0_flipped);
-  getCameraCalibration(visensor::SensorId::CAM1, calib, &is_cam1_flipped);
+  try {
+    ViCameraCalibration calibration;
+    config_->getSelectedCameraCalibration(&calibration, SensorId::SensorId::CAM0);
+    is_cam0_flipped = calibration.is_flipped_;
+    config_->getSelectedCameraCalibration(&calibration, SensorId::SensorId::CAM1);
+    is_cam1_flipped = calibration.is_flipped_;
+  }
+  catch (const std::exception& e)
+  {
+    VISENSOR_DEBUG("ViSensorDriver::Impl: Could not find set calibrations\n");
+  }
   return (is_cam0_flipped &&  is_cam1_flipped);
-
 }
+
+bool ViSensorDriver::Impl::cleanCameraCalibrations(const SensorId::SensorId cam_id,
+                                                   const int slot_id,
+                                                   const int is_flipped,
+                                                   const ViCameraLensModel::LensModelTypes lens_model_type,
+                                                   const ViCameraProjectionModel::ProjectionModelTypes projection_model_type){
+  if(config_->cleanCameraCalibration(cam_id, slot_id, is_flipped, lens_model_type, projection_model_type)) {
+    config_->saveConfig();
+    return true;
+  }
+  return false;
+}
+
+bool ViSensorDriver::Impl::cleanCameraCalibrations(const SensorId::SensorId cam_id, const int slot_id){
+  return config_->cleanCameraCalibration(cam_id, slot_id, -1, ViCameraLensModel::LensModelTypes::UNKNOWN, ViCameraProjectionModel::ProjectionModelTypes::UNKNOWN);
+}
+
+bool ViSensorDriver::Impl::cleanCameraCalibrations(const SensorId::SensorId cam_id){
+  return config_->cleanCameraCalibration(cam_id, -1, -1, ViCameraLensModel::LensModelTypes::UNKNOWN, ViCameraProjectionModel::ProjectionModelTypes::UNKNOWN);
+}
+
+bool ViSensorDriver::Impl::cleanCameraCalibrations(){
+  return config_->cleanCameraCalibration( SensorId::SensorId::NOT_SPECIFIED, -1, -1, ViCameraLensModel::LensModelTypes::UNKNOWN, ViCameraProjectionModel::ProjectionModelTypes::UNKNOWN);
+}
+
 //set factory calibration on slot 0 (private API call)
 //
-bool ViSensorDriver::Impl::setCameraFactoryCalibration(SensorId::SensorId cam_id, const ViCameraCalibration calib, bool flip_camera){
+void ViSensorDriver::Impl::setCameraFactoryCalibration(const ViCameraCalibration calib){
   if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
-  return ip_connection_->writeCameraCalibration(cam_id, static_cast<unsigned int>(flip_camera), calib);
+
+  if (config_->isValid() != true) {
+    throw visensor::exceptions::ConfigException("Load general calibration first before setting any calibration to avoid overwite of existing configuration");
+  }
+  if(calib.slot_id_ != 0){
+    throw visensor::exceptions::ConfigException("Slot ID has to be 0 for the factory calibrations.");
+  }
+
+  if (!config_->setCameraCalibration(calib)) {
+    throw visensor::exceptions::ConfigException("Failed to set factory camera calibration.");
+  }
+  if (!config_->saveConfig()) {
+    throw visensor::exceptions::ConnectionException("Failed to store the configuration on the sensor");
+  }
+}
+
+bool ViSensorDriver::Impl::isSensorPresent(const SensorId::SensorId sensor_id) const {
+  bool isPresent = false;
+  if(sensors_.count(sensor_id) > 0)
+    isPresent = true;
+  return isPresent;
+}
+
+void ViSensorDriver::Impl::setViSensorId(const int vi_sensor_id) {
+  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+  if (!config_->isValid()) {
+    if (!config_->loadConfig() ) {
+      throw visensor::exceptions::ConfigException("Could not load the configuration from the sensor!");
+    }
+  }
+  if (!config_->setViSensorId(vi_sensor_id))
+    throw visensor::exceptions::ConfigException("Failed to set the VISensor ID!");
+
+  if (!config_->saveConfig()) {
+    throw visensor::exceptions::ConnectionException("Failed to store the configuration on the sensor");
+  }
+}
+
+int ViSensorDriver::Impl::getViSensorId() const {
+  if(!initialized_) throw visensor::exceptions::ConnectionException("No connection to sensor.");
+  if (!config_->isValid()) {
+    if (!config_->loadConfig() ) {
+      throw visensor::exceptions::ConfigException("Could not load the configuration from the sensor!");
+    }
+  }
+  int sensor_id;
+  if ((sensor_id = config_->getViSensorId()) <  0)
+    throw visensor::exceptions::ConfigException("Failed to get the VISensor ID!");
+  return sensor_id;
 }
 
 }  //namespace visensor

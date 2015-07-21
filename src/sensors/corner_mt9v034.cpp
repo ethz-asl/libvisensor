@@ -92,8 +92,9 @@ void CornerMt9v034::processMeasurements() {
 
     corner_ptr->camera_id = camera_id_;
     corner_ptr->timestamp = meas->timestamp;
-    corner_ptr->timestamp_host = meas->timestamp_host;
+    corner_ptr->timestamp_synchronized = meas->timestamp_synchronized;
     corner_ptr->timestamp_fpga_counter = meas->timestamp_fpga_counter;
+    corner_ptr->timestamp_host = meas->timestamp_host;
 
     // process corners
     uint32_t pos = 0;

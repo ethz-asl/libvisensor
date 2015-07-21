@@ -212,6 +212,9 @@ class CameraMt9v034Config {
     param_server_.addParam("dangerous_reserved_register", param_server::CONST_T,
                            0x20, 0x03C7, 0xFFFF);  // needed to avoid fixed patern noise with short shutter times
 
+    param_server_.addParam("aec_low_pass_filter", param_server::CONST_T, 0xA8,
+                           0, 0xFFFF);  // This value plays a role in determining the increment
+                                             // decrement size of exposure value from frame to frame.
     param_server_.addParam("agc_pixel_count", param_server::CONST_T, 0xB0,
                            0xABE0, 0xFFFF);  // needed to avoid fixed patern noise with short shutter times
     param_server_.addParam("agc_current_bin", param_server::CONST_T, 0xBC, 0x0,

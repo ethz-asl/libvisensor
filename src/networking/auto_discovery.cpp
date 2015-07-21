@@ -140,7 +140,7 @@ class client
   deadline_timer deadline_;
 };
 
-std::vector<boost::asio::ip::address_v4> AutoDiscovery::getIpList() {
+std::vector<AutoDiscovery::IpSetting> AutoDiscovery::getIpList() {
 
   // retrieve the current interfaces
   ifaddrs *interfaces = NULL;
@@ -148,7 +148,7 @@ std::vector<boost::asio::ip::address_v4> AutoDiscovery::getIpList() {
   VISENSOR_ASSERT_COND(rc==-1, "Could not obtain list of network interfaces.");
 
   //get ip address for all active IPv4 interfaces
-  std::vector<boost::asio::ip::address_v4> ip_addresses;
+  std::vector<IpSetting> ip_addresses;
 
   for (ifaddrs *ifa = interfaces; ifa != NULL; ifa = ifa->ifa_next)
   {
@@ -161,9 +161,15 @@ std::vector<boost::asio::ip::address_v4> AutoDiscovery::getIpList() {
       char host[NI_MAXHOST];
       int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
       VISENSOR_ASSERT_COND(s!=0, "Could not obtain ipaddr for network interface.");
+      char mask[NI_MAXHOST];
+      s = getnameinfo(ifa->ifa_netmask, sizeof(struct sockaddr_in), mask, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+      VISENSOR_ASSERT_COND(s!=0, "Could not obtain netmask for network interface.");
 
-      //VISENSOR_DEBUG("\tAutodiscovery found interface: <%s>\n", host);
-      ip_addresses.push_back( boost::asio::ip::address_v4::from_string(host) );
+      // VISENSOR_DEBUG("\tAutodiscovery found interface: <%s; %s>\n", host, mask);
+      IpSetting ip;
+      ip.ip = boost::asio::ip::address_v4::from_string(host);
+      ip.mask = boost::asio::ip::address_v4::from_string(mask);
+      ip_addresses.push_back( ip );
     }
   }
 
@@ -180,12 +186,12 @@ ViDeviceList AutoDiscovery::findSensor()
     socket_.open(boost::asio::ip::udp::v4(), error);
 
     // get list of interfaces
-    std::vector<boost::asio::ip::address_v4> ip_addresses = getIpList();
+    std::vector<AutoDiscovery::IpSetting> ip_addresses = getIpList();
 
     VISENSOR_DEBUG("Autodiscovery is searching for sensor on interfaces:\n");
 
     for(uint j = 0; j<ip_addresses.size(); j++)
-      VISENSOR_DEBUG("%d: IP: %s NETMASK: %s\n", j, ip_addresses[j].to_string().c_str(), boost::asio::ip::address_v4::netmask(ip_addresses[j]).to_string().c_str());
+      VISENSOR_DEBUG("\t %d: IP: %s NETMASK: %s\n", j, ip_addresses[j].ip.to_string().c_str(), ip_addresses[j].mask.to_string().c_str());
 
     socket_.set_option(boost::asio::ip::udp::socket::reuse_address(true));
     socket_.set_option(boost::asio::socket_base::broadcast(true));
@@ -205,7 +211,7 @@ ViDeviceList AutoDiscovery::findSensor()
       for(uint j = 0; j<ip_addresses.size(); j++)
       {
         //VISENSOR_DEBUG("send to: %s with netmask: %s\n", ip_addresses[j].to_string().c_str(), boost::asio::ip::address_v4::netmask(ip_addresses[j]).to_string().c_str());
-        boost::asio::ip::udp::endpoint senderEndpoint(boost::asio::ip::address_v4::broadcast(ip_addresses[j], boost::asio::ip::address_v4::netmask(ip_addresses[j])), port_);
+        boost::asio::ip::udp::endpoint senderEndpoint(boost::asio::ip::address_v4::broadcast(ip_addresses[j].ip, ip_addresses[j].mask), port_);
         try {
           socket_.send_to(boost::asio::buffer(message), senderEndpoint);
         } catch(std::exception const &ex)

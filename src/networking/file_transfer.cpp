@@ -30,99 +30,145 @@
  */
 
 #include <fstream>
+
 #include <boost/array.hpp>
 #include <boost/asio.hpp>
 
 #include "networking/file_transfer.hpp"
+#include "visensor/visensor_exceptions.hpp"
 
-namespace
+namespace visensor {
+
+FileTransfer::FileTransfer(SshConnection::Ptr connection)
+    : ssh_connection_(connection)
 {
-const std::size_t CHUNK_SIZE = 8096;
 }
 
-FileTransfer::FileTransfer(boost::asio::ip::tcp::socket& socket)
-: socket_(socket){
+FileTransfer::~FileTransfer()
+{
 }
 
-FileTransfer::~FileTransfer() {
+void FileTransfer::downloadFile(const std::string& local_path, const std::string& remote_path)
+{
+  // receive file and write to path
+  if (!ssh_connection_->getFile(remote_path, local_path))
+    throw visensor::exceptions::ConnectionException(
+        "Could not downloading file from the sensor " + remote_path + " to " + local_path);
 }
 
-void FileTransfer::sendFile(std::string& local_path, std::string& remote_path) {
+void FileTransfer::deleteRemoteFile(const std::string& remote_file, bool remount)
+{
+  std::string output;
+  int exitcode = 127;
 
-  sendPathString(remote_path);
+  // remount the sensor if needed
+  setFileMountRW(remount);
 
-  std::ifstream stream(local_path.c_str(), std::ios::binary);
-  if (!stream)
-  {
-    VISENSOR_DEBUG("could not open file: %s\n", local_path.c_str());
-    return;
+  //delete existing file
+  ssh_connection_->runCommand("ls " + remote_file, &output, exitcode);
+  if (exitcode == 0) {
+    ssh_connection_->runCommand("rm " + remote_file, &output, exitcode);
   }
 
-  stream.seekg(0, std::ios::end);
-  uint64_t length = stream.tellg();
-  stream.seekg(0);
+  setFileMountRW(false);
+}
+void FileTransfer::uploadFile(const std::string& local_path, const std::string& remote_file,
+                              bool remount)
+{
+  // get only the path without filename to create the folder if needed
+  std::string remote_path = remote_file.substr(0, remote_file.find_last_of("\\/"));
+  std::string output;
+  int exitcode = 127;
 
-  // file length
-  boost::asio::write(socket_, boost::asio::buffer(&length, sizeof(length)));
+  std::ifstream local_file;
+  local_file.open(local_path.c_str());
+  std::string local_file_content;
+  local_file >> local_file_content;
 
-  // file content
-  boost::array<char, CHUNK_SIZE> chunk;
+  // remount the sensor if needed
+  setFileMountRW(remount);
 
-  uint64_t transferred = 0;
+  ssh_connection_->runCommand("ls " + remote_path, &output, exitcode);
+  if (exitcode != 0)
+    ssh_connection_->runCommand("mkdir " + remote_path, &output, exitcode);
+  if (exitcode)
+    throw visensor::exceptions::ConnectionException(
+        "Could not create directory " + remote_path + " on the sensor.");
 
-  while (transferred != length)
-  {
-    uint64_t remaining = length - transferred;
-    std::size_t chunk_size = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : static_cast<std::size_t>(remaining);
-    stream.read(&chunk[0], chunk_size);
-    boost::asio::write(socket_, boost::asio::buffer(chunk, chunk_size));
-    transferred += chunk_size;
+  //delete existing file
+  ssh_connection_->runCommand("ls " + remote_file, &output, exitcode);
+  if (exitcode == 0) {
+    ssh_connection_->runCommand("rm " + remote_file, &output, exitcode);
   }
+
+  // read file from path and send it to the sensor
+  if (!ssh_connection_->sendFile(local_path, remote_file))
+    throw visensor::exceptions::ConnectionException(
+        "Could not upload file " + local_path + " to the sensor " + remote_file);
+
+  setFileMountRW(false);
 }
 
-void FileTransfer::receiveFile(std::string& local_path, std::string& remote_path) {
+void FileTransfer::readRemoteFile(const std::string &remote_path, std::string* file_content)
+{
+  if (!ssh_connection_->loadFile(remote_path, file_content))
+    throw visensor::exceptions::ConnectionException(
+        "Could not load file content from sensor file: " + remote_path);
 
-  sendPathString(remote_path);
-
-  std::ofstream stream(local_path.c_str(), std::ios::binary);
-  if (!stream)
-  {
-    VISENSOR_DEBUG( "could not save file: %s\n", local_path.c_str());
-    return;
-  }
-
-  // file length
-  uint64_t length = 0;
-  boost::asio::read(socket_, boost::asio::buffer(&length, sizeof(length)));
-
-  // file content
-  boost::array<char, CHUNK_SIZE> chunk;
-
-  uint64_t transferred = 0;
-
-  while (transferred != length)
-  {
-    uint64_t remaining = length - transferred;
-    std::size_t chunk_size = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : static_cast<std::size_t>(remaining);
-    boost::asio::read(socket_, boost::asio::buffer(chunk, chunk_size));
-    stream.write(&chunk[0], chunk_size);
-    transferred += chunk_size;
-  }
 }
 
-std::string FileTransfer::sendPathString(std::string string) {
-//  // send string length
-//  boost::uint64_t string_size = string.size();
-//  boost::asio::write(socket_, boost::asio::buffer(&string_size, sizeof(string_size)));
-//
-//  // send string
-//  boost::asio::write(socket_, boost::asio::buffer(&string, sizeof(string_size)));
+void FileTransfer::writeRemoteFile(const std::string &remote_file, const std::string &file_content,
+                                   bool remount)
+{
+  // get only the path without filename to create the folder if needed
+  std::string remote_path = remote_file.substr(0, remote_file.find_last_of("\\/"));
+  std::string output;
+  int exitcode = 127;
 
-  boost::asio::streambuf buff;
-  std::ostream os(&buff);
-  os << string;
+  // remount the sensor if needed
+  setFileMountRW(remount);
 
-  socket_.send(buff.data());  // for example
+  // create folder if there is no
+  ssh_connection_->runCommand("ls " + remote_path, &output, exitcode);
+  if (exitcode != 0)
+    ssh_connection_->runCommand("mkdir " + remote_path, &output, exitcode);
+  if (exitcode)
+    throw visensor::exceptions::ConnectionException(
+        "Could not create directory " + remote_path + " on the sensor.");
 
-  return string;
+  //delete existing file
+  ssh_connection_->runCommand("ls " + remote_file, &output, exitcode);
+  if (exitcode == 0) {
+    ssh_connection_->runCommand("rm " + remote_file, &output, exitcode);
+  }
+
+  if (!ssh_connection_->writeToFile(remote_file, file_content))
+    throw visensor::exceptions::ConnectionException(
+        "Could not write file content to sensor file: " + remote_file);
+  setFileMountRW(false);
+
+}
+
+//RW: true ==> read-write, RW: false ==> read-only
+void FileTransfer::setFileMountRW(bool RW)
+{
+
+  std::string output;
+  int exitcode = 127;
+
+  /*command */
+  std::string cmd;
+  if (RW)
+    cmd = "mount -o remount,rw /";
+  else
+    cmd = "mount -o remount,ro /";
+
+  /* run command */
+  ssh_connection_->runCommand(cmd, &output, exitcode);
+
+  //0 and 255 are success exit codes
+  if (exitcode != 0 && exitcode != 255)
+    throw visensor::exceptions::ConnectionException("Could not change RW mode on sensor!\n");
+}
+
 }

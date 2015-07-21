@@ -52,7 +52,12 @@ class AutoDiscovery {
 
  private:
   typedef std::set<std::string> SensorSet;
-  std::vector<boost::asio::ip::address_v4> getIpList();
+
+  struct IpSetting {
+    boost::asio::ip::address_v4 ip;
+    boost::asio::ip::address_v4 mask;
+  };
+  std::vector<IpSetting> getIpList();
 
   boost::asio::io_service io_service_;
   boost::asio::ip::udp::socket socket_;
