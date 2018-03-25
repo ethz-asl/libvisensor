@@ -145,7 +145,7 @@ void StereoHomography::getHomography(Eigen::Matrix3d& H0, Eigen::Matrix3d& H1, d
   Eigen::Matrix4d T_rel = Eigen::Matrix4d::Zero();
   T_rel = T1 * T0.inverse();
 
-  std::cout << "T_rel " << T_rel << std::endl;
+  std::cerr << "T_rel " << T_rel << std::endl;
   Eigen::Matrix3d R = T_rel.block<3, 3>(0, 0);
   Eigen::Vector3d T = T_rel.block<3, 1>(0, 3);
 
